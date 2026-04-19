@@ -671,8 +671,8 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
       sh.appendRow(['Date','Total Cal','Total Protein (g)','Total Carbs (g)','Goal (kcal)','Balance','Items']);
       sh.getRange(1,1,1,7).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
     } else if (sheet === 'Workouts') {
-      sh.appendRow(['Date','Muscles','Exercises','Calories Burned','Summary']);
-      sh.getRange(1,1,1,5).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+      sh.appendRow(['Date','Time','Exercise','Muscles / Type','Set #','Reps / Duration','Weight / Distance','Intensity','Calories']);
+      sh.getRange(1,1,1,9).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
     } else if (sheet === 'Weight') {
       sh.appendRow(['Date','Weight (kg)']);
       sh.getRange(1,1,1,2).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
@@ -1337,18 +1337,35 @@ function renderMuscleCoverage() {} // replaced by updateBodyMap
 
 function renderWorkoutRecs() {} // replaced by updateBodyMap
 
-function finishWorkout() {
+async function finishWorkout() {
   if (!state.todayExercises.length) { showToast('No exercises to save'); return; }
   const total = state.todayExercises.reduce((s,e) => s+e.cal, 0);
   const muscles = [...new Set(state.todayExercises.flatMap(e=>e.muscles||[e.muscle||'']))].join(', ');
-  const summary = state.todayExercises.map(e=> e.type==='cardio' ? `${e.name} ${e.duration}min` : `${e.name} ${(e.setRows||[]).length}sets`).join(' | ');
   state.history.workouts = state.history.workouts || [];
   state.history.workouts.push({ date: new Date().toLocaleDateString(), muscles, cal: total, exercises: state.todayExercises.length });
   if (state.history.workouts.length > 30) state.history.workouts.shift();
   saveState();
   updateCalorieRing();
   showToast('Workout saved! ' + total + ' kcal burned');
-  logToSheets('Workouts', [new Date().toLocaleDateString(), muscles, state.todayExercises.length, total, summary]);
+
+  // Log to sheets: one row per set per exercise
+  const date = new Date().toLocaleDateString();
+  const time = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  for (const ex of state.todayExercises) {
+    if (ex.type === 'cardio') {
+      // Cardio: single row
+      await logToSheets('Workouts', [date, time, ex.name, 'Cardio', '—', ex.duration + ' min', ex.distance ? ex.distance + ' km' : '—', ex.intensity, ex.cal]);
+    } else {
+      // Gym: one row per set
+      const rows = ex.setRows || [{reps: ex.reps || 0, weight: ex.weight || 0}];
+      const muscleStr = (ex.muscles || []).join(', ');
+      for (let i = 0; i < rows.length; i++) {
+        await logToSheets('Workouts', [date, time, ex.name, muscleStr, i + 1, rows[i].reps, rows[i].weight ? rows[i].weight + ' kg' : 'Bodyweight', '—', Math.round(ex.cal / rows.length)]);
+      }
+    }
+  }
+  // Summary row
+  await logToSheets('Workouts', [date, time, '── TOTAL ──', muscles, state.todayExercises.length + ' exercises', '—', '—', '—', total]);
 }
 
 // ══════════════════════ CALORIE RING ══════════════════════
