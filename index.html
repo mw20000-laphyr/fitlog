@@ -768,10 +768,13 @@ function selectMeal(meal, el) {
   el.classList.add('sel');
 }
 
+let isLooking = false;
 async function lookupFood() {
+  if (isLooking) return;
   const name = document.getElementById('food-name-input').value.trim();
   if (!name) return;
   if (!state.geminiKey) { showToast('Add your Gemini API key in Settings first'); showGeminiPrompt(); return; }
+  isLooking = true;
   document.getElementById('lookup-icon').textContent = '⏳';
   document.getElementById('ai-analyzing').style.display = 'block';
   document.getElementById('food-input-methods').style.opacity = '0.4';
@@ -795,6 +798,7 @@ async function lookupFood() {
   } catch(e) {
     showToast('❌ ' + e.message);
   }
+  isLooking = false;
   document.getElementById('lookup-icon').textContent = '🔍';
   document.getElementById('ai-analyzing').style.display = 'none';
   document.getElementById('food-input-methods').style.opacity = '1';
