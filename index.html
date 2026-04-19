@@ -227,8 +227,8 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
       </select>
     </div>
     <div class="field">
-      <label>Gemini API Key <span style="color:var(--accent)">★ Required for AI features</span></label>
-      <input id="setup-gemini" type="text" placeholder="Paste your Gemini API key here">
+      <label>Gemini API Key <span style="color:var(--text3)">(no longer needed — AI now uses Pollinations)</span></label>
+      <input id="setup-gemini" type="text" placeholder="Not required anymore" disabled style="opacity:0.4">
       <div style="font-size:11px;color:var(--text3);margin-top:4px;">Free at aistudio.google.com → Get API Key</div>
     </div>
     <div class="field">
@@ -773,26 +773,18 @@ async function lookupFood() {
   if (isLooking) return;
   const name = document.getElementById('food-name-input').value.trim();
   if (!name) return;
-  if (!state.geminiKey) { showToast('Add your Gemini API key in Settings first'); showGeminiPrompt(); return; }
   isLooking = true;
   document.getElementById('lookup-icon').textContent = '⏳';
   document.getElementById('ai-analyzing').style.display = 'block';
   document.getElementById('food-input-methods').style.opacity = '0.4';
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.geminiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: `You are a nutrition expert. Give nutrition info for: "${name}". Return ONLY valid JSON, no other text: {"name":"full food name with portion","calories":000,"protein":00,"carbs":00,"note":"brief serving note e.g. per 100g or 1 cup"}` }] }],
-        generationConfig: { temperature: 0.1 }
-      })
+    const prompt = `You are a nutrition expert. Give nutrition info for: "${name}". Return ONLY valid JSON, no markdown, no explanation: {"name":"full food name with portion","calories":000,"protein":00,"carbs":00,"note":"brief serving note e.g. per 100g or 1 cup"}`;
+    const res = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai&json=true`, {
+      method: 'GET'
     });
-    const data = await res.json();
-    if (data.error) throw new Error('API: ' + data.error.message);
-    if (!data.candidates?.[0]) throw new Error('No response: ' + JSON.stringify(data).slice(0,120));
-    const txt = data.candidates[0].content.parts[0].text;
+    const txt = await res.text();
     const match = txt.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('Bad format: ' + txt.slice(0,120));
+    if (!match) throw new Error('Bad response: ' + txt.slice(0,100));
     const json = JSON.parse(match[0]);
     showFoodPreview(json);
   } catch(e) {
@@ -946,32 +938,12 @@ function capturePhoto() {
   analyzeFood(imgData);
 }
 async function analyzeFood(imgData) {
-  if (!state.geminiKey) { showToast('Add your Gemini API key in Settings first'); showGeminiPrompt(); return; }
-  document.getElementById('ai-analyzing').style.display = 'block';
-  document.getElementById('food-input-methods').style.opacity = '0.4';
-  try {
-    const base64 = imgData.split(',')[1];
-    const mimeType = imgData.split(';')[0].split(':')[1] || 'image/jpeg';
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.geminiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { inline_data: { mime_type: mimeType, data: base64 } },
-          { text: 'Identify this food and estimate nutrition. Return ONLY valid JSON, no other text: {"name":"food name with estimated portion","calories":000,"protein":00,"carbs":00,"note":"e.g. estimated 1 serving ~200g"}' }
-        ]}],
-        generationConfig: { temperature: 0.1 }
-      })
-    });
-    const data = await res.json();
-    const txt = data.candidates[0].content.parts[0].text;
-    const match = txt.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON found');
-    const json = JSON.parse(match[0]);
-    showFoodPreview(json);
-  } catch(e) { showToast('Could not analyse photo. Try typing the food name instead.'); }
+  // Pollinations doesn't support image input on free tier
+  // Show prompt asking user to type the food name instead
   document.getElementById('ai-analyzing').style.display = 'none';
   document.getElementById('food-input-methods').style.opacity = '1';
+  showToast('Photo uploaded! Type the food name below to look up calories.');
+  document.getElementById('food-name-input').focus();
 }
 
 // ══════════════════════ WORKOUT ══════════════════════
