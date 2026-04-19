@@ -786,7 +786,9 @@ async function lookupFood() {
     });
     const data = await res.json();
     const txt = data.candidates[0].content.parts[0].text;
-    const json = JSON.parse(txt.match(/\{.*?\}/s)[0]);
+    const match = txt.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON found');
+    const json = JSON.parse(match[0]);
     showFoodPreview(json);
   } catch(e) {
     showToast('Could not look up. Check your API key or enter manually.');
@@ -863,12 +865,20 @@ function removeFood(idx) {
   saveState(); renderFood(); updateCalorieRing();
 }
 
-function uploadPhoto() { document.getElementById('photo-upload').click(); }
+function uploadPhoto() {
+  const input = document.getElementById('photo-upload');
+  input.value = ''; // reset so same file can be re-uploaded
+  input.click();
+}
 function handlePhotoUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = ev => analyzeFood(ev.target.result);
+  reader.onload = ev => {
+    document.getElementById('photo-preview').src = ev.target.result;
+    document.getElementById('photo-preview').style.display = 'block';
+    analyzeFood(ev.target.result);
+  };
   reader.readAsDataURL(file);
 }
 
@@ -949,7 +959,9 @@ async function analyzeFood(imgData) {
     });
     const data = await res.json();
     const txt = data.candidates[0].content.parts[0].text;
-    const json = JSON.parse(txt.match(/\{.*?\}/s)[0]);
+    const match = txt.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON found');
+    const json = JSON.parse(match[0]);
     showFoodPreview(json);
   } catch(e) { showToast('Could not analyse photo. Try typing the food name instead.'); }
   document.getElementById('ai-analyzing').style.display = 'none';
