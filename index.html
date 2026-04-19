@@ -785,13 +785,15 @@ async function lookupFood() {
       })
     });
     const data = await res.json();
+    if (data.error) throw new Error('API: ' + data.error.message);
+    if (!data.candidates?.[0]) throw new Error('No response: ' + JSON.stringify(data).slice(0,120));
     const txt = data.candidates[0].content.parts[0].text;
     const match = txt.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON found');
+    if (!match) throw new Error('Bad format: ' + txt.slice(0,120));
     const json = JSON.parse(match[0]);
     showFoodPreview(json);
   } catch(e) {
-    showToast('Could not look up. Check your API key or enter manually.');
+    showToast('❌ ' + e.message);
   }
   document.getElementById('lookup-icon').textContent = '🔍';
   document.getElementById('ai-analyzing').style.display = 'none';
