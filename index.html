@@ -448,59 +448,118 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
     <button class="btn btn-secondary btn-sm" onclick="toggleAI()">🤖 AI</button>
   </div>
 
-  <!-- TARGET MUSCLES -->
-  <div class="card">
-    <div class="card-label">Today's Target Muscles</div>
-    <div class="tag-scroll" id="muscle-selector">
-      <div class="tag-pill" data-muscle="Chest" onclick="toggleMuscle(this)">Chest</div>
-      <div class="tag-pill" data-muscle="Back" onclick="toggleMuscle(this)">Back</div>
-      <div class="tag-pill" data-muscle="Shoulders" onclick="toggleMuscle(this)">Shoulders</div>
-      <div class="tag-pill" data-muscle="Biceps" onclick="toggleMuscle(this)">Biceps</div>
-      <div class="tag-pill" data-muscle="Triceps" onclick="toggleMuscle(this)">Triceps</div>
-      <div class="tag-pill" data-muscle="Legs" onclick="toggleMuscle(this)">Legs</div>
-      <div class="tag-pill" data-muscle="Glutes" onclick="toggleMuscle(this)">Glutes</div>
-      <div class="tag-pill" data-muscle="Core" onclick="toggleMuscle(this)">Core</div>
-      <div class="tag-pill" data-muscle="Calves" onclick="toggleMuscle(this)">Calves</div>
-      <div class="tag-pill" data-muscle="Forearms" onclick="toggleMuscle(this)">Forearms</div>
+  <!-- MODE TOGGLE -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+    <button class="btn btn-primary" id="mode-gym-btn" onclick="setWorkoutMode('gym')" style="padding:12px;">🏋️ Gym</button>
+    <button class="btn btn-secondary" id="mode-cardio-btn" onclick="setWorkoutMode('cardio')" style="padding:12px;">🏃 Cardio</button>
+  </div>
+
+  <!-- GYM MODE -->
+  <div id="gym-mode">
+    <!-- TARGET MUSCLES -->
+    <div class="card">
+      <div class="card-label">Today's Target Muscles</div>
+      <div class="tag-scroll" id="muscle-selector">
+        <div class="tag-pill" data-muscle="Chest" onclick="toggleMuscle(this)">Chest</div>
+        <div class="tag-pill" data-muscle="Back" onclick="toggleMuscle(this)">Back</div>
+        <div class="tag-pill" data-muscle="Shoulders" onclick="toggleMuscle(this)">Shoulders</div>
+        <div class="tag-pill" data-muscle="Biceps" onclick="toggleMuscle(this)">Biceps</div>
+        <div class="tag-pill" data-muscle="Triceps" onclick="toggleMuscle(this)">Triceps</div>
+        <div class="tag-pill" data-muscle="Legs" onclick="toggleMuscle(this)">Legs</div>
+        <div class="tag-pill" data-muscle="Glutes" onclick="toggleMuscle(this)">Glutes</div>
+        <div class="tag-pill" data-muscle="Core" onclick="toggleMuscle(this)">Core</div>
+        <div class="tag-pill" data-muscle="Calves" onclick="toggleMuscle(this)">Calves</div>
+        <div class="tag-pill" data-muscle="Forearms" onclick="toggleMuscle(this)">Forearms</div>
+      </div>
+    </div>
+
+    <!-- EXERCISE ENTRY -->
+    <div class="card">
+      <div class="card-label">Add Exercise</div>
+      <div class="field">
+        <label>Exercise Name</label>
+        <input id="ex-name" type="text" placeholder="e.g. Bench Press">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div><label>Sets</label><input id="ex-sets" type="number" placeholder="4" min="1"></div>
+        <div><label>Reps</label><input id="ex-reps" type="number" placeholder="10" min="1"></div>
+        <div><label>Weight (kg)</label><input id="ex-weight" type="number" placeholder="60" step="0.5"></div>
+      </div>
+      <div class="field">
+        <label>Primary Muscle</label>
+        <select id="ex-muscle">
+          <option>Chest</option><option>Back</option><option>Shoulders</option>
+          <option>Biceps</option><option>Triceps</option><option>Legs</option>
+          <option>Glutes</option><option>Core</option><option>Calves</option><option>Forearms</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="addExercise()">+ Add Exercise</button>
+    </div>
+
+    <!-- MUSCLE COVERAGE -->
+    <div class="section-header"><div class="section-label">Muscle Coverage</div></div>
+    <div class="muscle-grid" id="muscle-coverage"></div>
+
+    <!-- RECOMMENDATIONS -->
+    <div class="card" id="workout-recs-card" style="margin-top:12px;">
+      <div class="card-label">Recommendations</div>
+      <div id="workout-recs"><div style="font-size:13px;color:var(--text3);">Select muscles and add exercises to get recommendations.</div></div>
     </div>
   </div>
 
-  <!-- EXERCISE ENTRY -->
-  <div class="card">
-    <div class="card-label">Add Exercise</div>
-    <div class="field">
-      <label>Exercise Name</label>
-      <input id="ex-name" type="text" placeholder="e.g. Bench Press">
+  <!-- CARDIO MODE -->
+  <div id="cardio-mode" style="display:none;">
+    <!-- QUICK ACTIVITY BUTTONS -->
+    <div class="card">
+      <div class="card-label">Quick Add Activity</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;">
+        <button class="btn btn-secondary" onclick="quickCardio('🚶 Walk','Walking',4)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">🚶</span><span style="font-size:11px;">Walk</span>
+        </button>
+        <button class="btn btn-secondary" onclick="quickCardio('🏃 Run','Running',9)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">🏃</span><span style="font-size:11px;">Run</span>
+        </button>
+        <button class="btn btn-secondary" onclick="quickCardio('🚴 Cycle','Cycling',7)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">🚴</span><span style="font-size:11px;">Cycle</span>
+        </button>
+        <button class="btn btn-secondary" onclick="quickCardio('🏊 Swim','Swimming',8)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">🏊</span><span style="font-size:11px;">Swim</span>
+        </button>
+        <button class="btn btn-secondary" onclick="quickCardio('⛹️ HIIT','HIIT',12)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">⛹️</span><span style="font-size:11px;">HIIT</span>
+        </button>
+        <button class="btn btn-secondary" onclick="quickCardio('🧘 Yoga','Yoga',3)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">🧘</span><span style="font-size:11px;">Yoga</span>
+        </button>
+      </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
-      <div><label>Sets</label><input id="ex-sets" type="number" placeholder="4" min="1"></div>
-      <div><label>Reps</label><input id="ex-reps" type="number" placeholder="10" min="1"></div>
-      <div><label>Weight (kg)</label><input id="ex-weight" type="number" placeholder="60" step="0.5"></div>
+
+    <!-- CARDIO ENTRY FORM -->
+    <div class="card">
+      <div class="card-label">Add Cardio</div>
+      <div class="field">
+        <label>Activity</label>
+        <input id="cardio-name" type="text" placeholder="e.g. Morning Walk, Treadmill Run">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div><label>Duration (min)</label><input id="cardio-duration" type="number" placeholder="30" min="1"></div>
+        <div><label>Distance (km) <span style="color:var(--text3)">optional</span></label><input id="cardio-distance" type="number" placeholder="3.0" step="0.1"></div>
+      </div>
+      <div class="field">
+        <label>Intensity</label>
+        <select id="cardio-intensity">
+          <option value="low">Low (leisurely walk, yoga)</option>
+          <option value="moderate" selected>Moderate (brisk walk, light jog)</option>
+          <option value="high">High (running, HIIT, fast cycling)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="addCardio()">+ Add Cardio</button>
     </div>
-    <div class="field">
-      <label>Primary Muscle</label>
-      <select id="ex-muscle">
-        <option>Chest</option><option>Back</option><option>Shoulders</option>
-        <option>Biceps</option><option>Triceps</option><option>Legs</option>
-        <option>Glutes</option><option>Core</option><option>Calves</option><option>Forearms</option>
-      </select>
-    </div>
-    <button class="btn btn-primary btn-full" onclick="addExercise()">+ Add Exercise</button>
   </div>
 
-  <!-- MUSCLE COVERAGE -->
-  <div class="section-header"><div class="section-label">Muscle Coverage</div></div>
-  <div class="muscle-grid" id="muscle-coverage"></div>
-
-  <!-- RECOMMENDATIONS -->
-  <div class="card" id="workout-recs-card" style="margin-top:12px;">
-    <div class="card-label">AI Recommendations</div>
-    <div id="workout-recs"><div style="font-size:13px;color:var(--text3);">Select muscles and add exercises to get recommendations.</div></div>
-  </div>
-
-  <!-- EXERCISES LIST -->
+  <!-- EXERCISES LIST (shared) -->
   <div class="section-header" style="margin-top:12px;">
-    <div class="section-label">Exercises Logged</div>
+    <div class="section-label">Today's Activity</div>
     <div id="workout-cal-disp" style="font-size:13px;color:var(--blue);font-family:var(--mono)"></div>
   </div>
   <div id="exercise-list"></div>
@@ -1026,23 +1085,75 @@ function removeExercise(idx) {
   saveState(); renderExercises(); renderMuscleCoverage(); updateCalorieRing();
 }
 
+// ── WORKOUT MODE ──
+let workoutMode = 'gym';
+function setWorkoutMode(mode) {
+  workoutMode = mode;
+  document.getElementById('gym-mode').style.display = mode === 'gym' ? 'block' : 'none';
+  document.getElementById('cardio-mode').style.display = mode === 'cardio' ? 'block' : 'none';
+  document.getElementById('mode-gym-btn').className = 'btn ' + (mode === 'gym' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('mode-cardio-btn').className = 'btn ' + (mode === 'cardio' ? 'btn-primary' : 'btn-secondary');
+}
+
+// MET-based calorie estimate: cal = MET × weight(kg) × duration(h)
+const CARDIO_MET = { low: 3.5, moderate: 6.0, high: 10.0 };
+function estimateCardioCal(intensity, durationMin) {
+  const weight = state.profile ? state.profile.weight : 70;
+  const met = CARDIO_MET[intensity] || 6.0;
+  return Math.round(met * weight * (durationMin / 60));
+}
+
+function quickCardio(name, type, metBase) {
+  document.getElementById('cardio-name').value = name;
+  document.getElementById('cardio-intensity').value = metBase >= 9 ? 'high' : metBase >= 6 ? 'moderate' : 'low';
+  document.getElementById('cardio-duration').focus();
+}
+
+function addCardio() {
+  const name = document.getElementById('cardio-name').value.trim();
+  const duration = parseInt(document.getElementById('cardio-duration').value) || 0;
+  const distance = parseFloat(document.getElementById('cardio-distance').value) || 0;
+  const intensity = document.getElementById('cardio-intensity').value;
+  if (!name || !duration) { showToast('Enter activity name and duration'); return; }
+  const cal = estimateCardioCal(intensity, duration);
+  state.todayExercises.push({
+    name, sets: 1, reps: duration, weight: 0,
+    muscle: 'Cardio', cal,
+    type: 'cardio', duration, distance, intensity
+  });
+  saveState();
+  document.getElementById('cardio-name').value = '';
+  document.getElementById('cardio-duration').value = '';
+  document.getElementById('cardio-distance').value = '';
+  renderExercises();
+  updateCalorieRing();
+  showToast(name + ' — ~' + cal + ' kcal burned');
+}
+
 function renderExercises() {
   const total = state.todayExercises.reduce((s,e) => s+e.cal, 0);
   document.getElementById('workout-cal-disp').textContent = total ? '~' + total + ' kcal burned' : '';
   const el = document.getElementById('exercise-list');
   if (!state.todayExercises.length) { el.innerHTML = '<div class="card" style="text-align:center;color:var(--text3);font-size:13px;padding:16px;">No exercises yet</div>'; return; }
-  el.innerHTML = state.todayExercises.map((e,i) => `
+  el.innerHTML = state.todayExercises.map((e,i) => {
+    const isCardio = e.type === 'cardio';
+    const detail = isCardio
+      ? `${e.duration} min${e.distance ? ' · ' + e.distance + ' km' : ''} · ${e.intensity} intensity`
+      : `${e.sets} sets × ${e.reps} reps${e.weight ? ' @ ' + e.weight + 'kg' : ''}`;
+    const tagClass = isCardio ? 'tag-blue' : 'tag-purple';
+    const tagLabel = isCardio ? '🏃 Cardio' : e.muscle;
+    return `
     <div class="exercise-block">
       <div class="exercise-title">
         <div>
           <div class="exercise-name">${e.name}</div>
-          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${e.sets} sets × ${e.reps} reps${e.weight ? ' @ ' + e.weight + 'kg' : ''} · <span style="color:var(--blue)">~${e.cal} kcal</span></div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${detail} · <span style="color:var(--blue)">~${e.cal} kcal</span></div>
         </div>
         <button class="del-btn" onclick="removeExercise(${i})">×</button>
       </div>
-      <span class="tag tag-purple" style="font-size:11px;">${e.muscle}</span>
-    </div>
-  `).join('');
+      <span class="tag ${tagClass}" style="font-size:11px;">${tagLabel}</span>
+    </div>`;
+  }).join('');
 }
 
 function renderMuscleCoverage() {
@@ -1220,7 +1331,7 @@ async function syncTodayFood() {
   const today = new Date().toDateString();
   state.syncedFoodIds = state.syncedFoodIds || {};
 
-  // Send any unsynced food items
+  // Send any unsynced food items (individual rows)
   for (let i = 0; i < state.todayFood.length; i++) {
     const key = today + '_' + i;
     if (!state.syncedFoodIds[key]) {
@@ -1232,21 +1343,37 @@ async function syncTodayFood() {
     }
   }
 
-  // Send/update daily summary row
+  saveState();
+}
+
+// Called once at midnight to push the daily summary
+async function pushDailySummary(dateStr) {
+  const url = state.sheetsUrl;
+  if (!url) return;
   const totalCal = state.todayFood.reduce((s,f) => s+f.cal, 0);
   const totalProt = state.todayFood.reduce((s,f) => s+f.prot, 0);
   const totalCarbs = state.todayFood.reduce((s,f) => s+f.carbs, 0);
   const goal = state.profile ? calcTDEE(state.profile) : 0;
   const deficit = goal - totalCal;
   await logToSheets('Daily Summary', [
-    new Date().toLocaleDateString(),
+    dateStr || new Date().toLocaleDateString(),
     totalCal, totalProt, totalCarbs,
-    goal, deficit > 0 ? deficit + ' deficit' : Math.abs(deficit) + ' surplus',
+    goal,
+    deficit > 0 ? deficit + ' deficit' : Math.abs(deficit) + ' surplus',
     state.todayFood.length + ' items'
   ]);
-
-  saveState();
 }
+
+// Midnight check — runs every minute
+function checkMidnight() {
+  const now = new Date();
+  if (now.getHours() === 0 && now.getMinutes() === 0) {
+    // Push yesterday's summary before resetting
+    const yesterday = new Date(now - 86400000).toLocaleDateString();
+    pushDailySummary(yesterday);
+  }
+}
+setInterval(checkMidnight, 60000);
 
 function saveSheets() {
   const url = document.getElementById('sheets-url-input').value.trim();
