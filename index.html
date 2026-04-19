@@ -560,8 +560,39 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
   var sheet = e.parameter.sheet;
   var row = JSON.parse(e.parameter.row);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(sheet) || ss.insertSheet(sheet);
+  var sh = ss.getSheetByName(sheet);
+  if (!sh) {
+    sh = ss.insertSheet(sheet);
+    // Add headers based on sheet type
+    if (sheet === 'Calories') {
+      sh.appendRow(['Date','Time','Food','Calories','Protein (g)','Carbs (g)','Meal']);
+      sh.getRange(1,1,1,7).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    } else if (sheet === 'Daily Summary') {
+      sh.appendRow(['Date','Total Cal','Total Protein (g)','Total Carbs (g)','Goal (kcal)','Balance','Items']);
+      sh.getRange(1,1,1,7).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    } else if (sheet === 'Workouts') {
+      sh.appendRow(['Date','Muscles','Exercises','Calories Burned','Summary']);
+      sh.getRange(1,1,1,5).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    } else if (sheet === 'Weight') {
+      sh.appendRow(['Date','Weight (kg)']);
+      sh.getRange(1,1,1,2).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    }
+  }
+  // For Daily Summary, update today's row if exists instead of appending
+  if (sheet === 'Daily Summary' && sh.getLastRow() > 1) {
+    var data = sh.getDataRange().getValues();
+    var today = row[0];
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] == today) {
+        sh.getRange(i+1, 1, 1, row.length).setValues([row]);
+        return ContentService.createTextOutput(JSON.stringify({ok:true,updated:true}))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+  }
   sh.appendRow(row);
+  // Auto-resize columns
+  sh.autoResizeColumns(1, sh.getLastColumn());
   return ContentService.createTextOutput(JSON.stringify({ok:true}))
     .setMimeType(ContentService.MimeType.JSON);
 }</pre>
@@ -856,7 +887,7 @@ function commitFood(name, cal, prot, carbs) {
   renderFood();
   updateCalorieRing();
   showToast(name + ' — ' + cal + ' kcal added ✓');
-  logToSheets('Calories', [new Date().toLocaleDateString(), new Date().toLocaleTimeString(), name, cal, prot, carbs, currentMeal]);
+  syncTodayFood();
 }
 
 function removeFood(idx) {
@@ -1182,17 +1213,49 @@ async function logToSheets(sheet, row) {
   } catch(e) {}
 }
 
+// Sync all today's food that hasn't been synced yet, then send a daily summary row
+async function syncTodayFood() {
+  const url = state.sheetsUrl;
+  if (!url) return;
+  const today = new Date().toDateString();
+  state.syncedFoodIds = state.syncedFoodIds || {};
+
+  // Send any unsynced food items
+  for (let i = 0; i < state.todayFood.length; i++) {
+    const key = today + '_' + i;
+    if (!state.syncedFoodIds[key]) {
+      const f = state.todayFood[i];
+      await logToSheets('Calories', [
+        new Date().toLocaleDateString(), f.time, f.name, f.cal, f.prot, f.carbs, f.meal
+      ]);
+      state.syncedFoodIds[key] = true;
+    }
+  }
+
+  // Send/update daily summary row
+  const totalCal = state.todayFood.reduce((s,f) => s+f.cal, 0);
+  const totalProt = state.todayFood.reduce((s,f) => s+f.prot, 0);
+  const totalCarbs = state.todayFood.reduce((s,f) => s+f.carbs, 0);
+  const goal = state.profile ? calcTDEE(state.profile) : 0;
+  const deficit = goal - totalCal;
+  await logToSheets('Daily Summary', [
+    new Date().toLocaleDateString(),
+    totalCal, totalProt, totalCarbs,
+    goal, deficit > 0 ? deficit + ' deficit' : Math.abs(deficit) + ' surplus',
+    state.todayFood.length + ' items'
+  ]);
+
+  saveState();
+}
+
 function saveSheets() {
   const url = document.getElementById('sheets-url-input').value.trim();
   if (!url) { showToast('Please enter your Apps Script URL'); return; }
   state.sheetsUrl = url;
+  state.syncedFoodIds = {}; // reset so everything resyncs
   saveState();
   updateSheetsStatus();
-  // Test connection
-  const params = new URLSearchParams({ sheet: 'Calories', row: JSON.stringify([new Date().toLocaleDateString(), 'Connection test', 0, 0, 0, 'Test']) });
-  fetch(url + '?' + params.toString(), { method: 'GET', mode: 'no-cors' })
-    .then(() => { showToast('✓ Sheets connected & test row sent!'); })
-    .catch(() => { showToast('⚠️ Could not reach Sheets URL'); });
+  syncTodayFood().then(() => showToast('✓ Connected & syncing today\'s food!'));
 }
 
 function updateSheetsStatus() {
