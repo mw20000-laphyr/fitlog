@@ -132,6 +132,10 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: flex-end; z-index: 200; backdrop-filter: blur(4px); }
 .modal-overlay.hidden { display: none; }
 .modal { background: var(--bg2); border-radius: 20px 20px 0 0; padding: 24px 20px 40px; width: 100%; border-top: 1px solid var(--border2); animation: slide-up 0.3s ease; }
+.size-btn{background:var(--bg4);border:1.5px solid var(--border);border-radius:8px;color:var(--text2);font-size:10px;padding:6px 2px;cursor:pointer;text-align:center;line-height:1.4;transition:all 0.15s;width:100%;}
+.size-btn span{display:block;font-size:9px;color:var(--text3);margin-top:2px;}
+.size-btn.sel{border-color:var(--accent);background:rgba(110,240,139,0.12);color:var(--accent);}
+.size-btn.sel span{color:var(--accent);}
 @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .modal-title { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
 .modal-sub { font-size: 13px; color: var(--text3); margin-bottom: 20px; }
@@ -349,6 +353,17 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
         </div>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:8px;" id="preview-note"></div>
+      <!-- SIZE SELECTOR -->
+      <div style="margin-top:10px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">Portion size:</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;" id="size-selector">
+          <button class="size-btn" data-mul="0.5" onclick="selectSize(this)">🫙<br><span>Half</span></button>
+          <button class="size-btn sel" data-mul="1.0" onclick="selectSize(this)">🍽️<br><span>1 Serving</span></button>
+          <button class="size-btn" data-mul="1.5" onclick="selectSize(this)">🥣<br><span>Bowl</span></button>
+          <button class="size-btn" data-mul="0.25" onclick="selectSize(this)">🤏<br><span>Bite</span></button>
+          <button class="size-btn" data-mul="2.0" onclick="selectSize(this)">🍱<br><span>Large</span></button>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
         <button class="btn btn-secondary btn-sm" onclick="editPreview()">✏️ Edit</button>
         <button class="btn btn-primary btn-sm" onclick="confirmAddFood()">✓ Add to Log</button>
@@ -914,8 +929,26 @@ async function lookupFood() {
   document.getElementById('food-input-methods').style.opacity = '1';
 }
 
+let currentSizeMul = 1.0;
+
+function selectSize(btn) {
+  document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel');
+  currentSizeMul = parseFloat(btn.dataset.mul);
+  if (!pendingFood) return;
+  // Update preview numbers
+  document.getElementById('preview-cal').textContent = Math.round((pendingFood.calories||0) * currentSizeMul);
+  document.getElementById('preview-prot').textContent = Math.round((pendingFood.protein||0) * currentSizeMul);
+  document.getElementById('preview-carbs').textContent = Math.round((pendingFood.carbs||0) * currentSizeMul);
+}
+
 function showFoodPreview(json) {
   pendingFood = json;
+  currentSizeMul = 1.0;
+  // Reset size selector to 1 serving
+  document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('sel'));
+  const def = document.querySelector('.size-btn[data-mul="1.0"]');
+  if (def) def.classList.add('sel');
   document.getElementById('preview-name').textContent = json.name || '—';
   document.getElementById('preview-cal').textContent = json.calories || 0;
   document.getElementById('preview-prot').textContent = json.protein || 0;
@@ -927,7 +960,14 @@ function showFoodPreview(json) {
 
 function confirmAddFood() {
   if (!pendingFood) return;
-  commitFood(pendingFood.name, pendingFood.calories, pendingFood.protein, pendingFood.carbs);
+  const mul = currentSizeMul || 1.0;
+  const sizeName = mul === 0.25 ? ' (bite)' : mul === 0.5 ? ' (half)' : mul === 1.5 ? ' (bowl)' : mul === 2.0 ? ' (large)' : '';
+  commitFood(
+    pendingFood.name + sizeName,
+    Math.round((pendingFood.calories||0) * mul),
+    Math.round((pendingFood.protein||0) * mul),
+    Math.round((pendingFood.carbs||0) * mul)
+  );
   document.getElementById('ai-food-preview').style.display = 'none';
   pendingFood = null;
 }
@@ -1330,53 +1370,9 @@ function renderExercises() {
   }).join('');
 }
 
-function renderMuscleCoverage() {
-  const covered = {};
-  state.todayExercises.forEach(e => { covered[e.muscle] = (covered[e.muscle] || 0) + 1; });
-  const el = document.getElementById('muscle-coverage');
-  if (!state.selectedMuscles.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px;grid-column:span 2;padding:8px 0;">Select target muscles above</div>'; return; }
-  el.innerHTML = state.selectedMuscles.map(m => {
-    const count = covered[m] || 0;
-    const cls = count >= 2 ? 'hit' : count === 1 ? 'partial' : '';
-    const status = count >= 2 ? '✓ Well covered' : count === 1 ? '≈ Partially hit' : '✗ Not covered';
-    return `<div class="muscle-cell ${cls}"><div class="muscle-name">${m}</div><div class="muscle-status">${status} (${count} exercise${count!==1?'s':''})</div></div>`;
-  }).join('');
-}
+function renderMuscleCoverage() {} // replaced by updateBodyMap
 
-function renderWorkoutRecs() {
-  const covered = {};
-  state.todayExercises.forEach(e => { covered[e.muscle] = (covered[e.muscle] || 0) + 1; });
-  const missing = state.selectedMuscles.filter(m => !covered[m]);
-  const partial = state.selectedMuscles.filter(m => covered[m] === 1);
-  const el = document.getElementById('workout-recs');
-  if (!state.selectedMuscles.length) {
-    el.innerHTML = '<div style="font-size:13px;color:var(--text3);">Select muscles above to get recommendations.</div>';
-    return;
-  }
-  let html = '';
-  if (!missing.length && !partial.length) {
-    html = '<div style="font-size:14px;color:var(--accent);">✓ All target muscles are well covered!</div>';
-  } else {
-    if (missing.length) {
-      html += '<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Missing muscles:</div>';
-      html += missing.map(m => {
-        const ex = EXERCISE_DB[m] || [];
-        const pick = ex.slice(0,3).join(', ');
-        return `<div class="rec-item"><div class="rec-icon">💪</div><div><div class="rec-title">${m}</div><div class="rec-text">Try: ${pick}</div></div></div>`;
-      }).join('');
-    }
-    if (partial.length) {
-      html += '<div style="font-size:12px;color:var(--amber);margin:8px 0;">Partially covered — add one more exercise:</div>';
-      html += partial.map(m => {
-        const ex = EXERCISE_DB[m] || [];
-        const alreadyDone = state.todayExercises.filter(e=>e.muscle===m).map(e=>e.name);
-        const remaining = ex.filter(e => !alreadyDone.includes(e)).slice(0,2).join(' or ');
-        return `<div class="rec-item"><div class="rec-icon" style="background:var(--amber-dim);color:var(--amber);">↑</div><div><div class="rec-title">${m}</div><div class="rec-text">${remaining || 'Add another set'}</div></div></div>`;
-      }).join('');
-    }
-  }
-  el.innerHTML = html;
-}
+function renderWorkoutRecs() {} // replaced by updateBodyMap
 
 function finishWorkout() {
   if (!state.todayExercises.length) { showToast('No exercises to save'); return; }
