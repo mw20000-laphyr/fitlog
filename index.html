@@ -570,7 +570,29 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
       <div class="page-title">Progress</div>
       <div class="page-sub">Your journey</div>
     </div>
-    <button class="btn btn-secondary btn-sm" onclick="toggleAI()">🤖 AI</button>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-secondary btn-sm" onclick="showManualEntry()" title="Add past day data">📝</button>
+      <button class="btn btn-secondary btn-sm" onclick="toggleAI()">🤖 AI</button>
+    </div>
+  </div>
+
+  <!-- MANUAL ENTRY MODAL -->
+  <div id="manual-entry-modal" style="display:none;background:var(--bg3);border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid var(--border);">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">📝 Add Past Day Stats</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div><label style="font-size:11px;color:var(--text3);">Date</label>
+        <input type="date" id="manual-date" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text3);">Calories eaten</label>
+        <input type="number" id="manual-cal" placeholder="e.g. 1800" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text3);">Calories burned (gym)</label>
+        <input type="number" id="manual-burned" placeholder="e.g. 300" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text3);">Weight (kg) optional</label>
+        <input type="number" id="manual-weight" placeholder="e.g. 72.5" step="0.1" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('manual-entry-modal').style.display='none'">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveManualEntry()">Save</button>
+    </div>
   </div>
 
   <!-- WEIGHT CHART -->
@@ -764,11 +786,13 @@ const EXERCISE_DB = {
 };
 
 // ══════════════════════ INIT ══════════════════════
-function init() {
+async function init() {
   const saved = localStorage.getItem('fitlog_state');
   if (saved) {
     try { state = JSON.parse(saved); } catch(e) {}
     resetTodayIfNeeded();
+    // Run date check BEFORE renderAll so yesterday's data is saved first
+    await checkDateChange();
     if (state.profile) {
       document.getElementById('setup-modal').classList.add('hidden');
       renderAll();
@@ -1675,6 +1699,50 @@ function renderGymRecs() {
   ).join('');
 }
 
+// ══════════════════════ MANUAL HISTORY ENTRY ══════════════════════
+function showManualEntry() {
+  const modal = document.getElementById('manual-entry-modal');
+  modal.style.display = modal.style.display === 'none' ? 'block' : 'none';
+  // Default to yesterday
+  const yesterday = new Date(Date.now() - 86400000);
+  document.getElementById('manual-date').value = yesterday.toISOString().split('T')[0];
+}
+
+function saveManualEntry() {
+  const dateInput = document.getElementById('manual-date').value;
+  const cal = parseInt(document.getElementById('manual-cal').value) || 0;
+  const burned = parseInt(document.getElementById('manual-burned').value) || 0;
+  const weight = parseFloat(document.getElementById('manual-weight').value) || 0;
+  if (!dateInput || !cal) { showToast('Enter at least a date and calories'); return; }
+
+  const dateStr = new Date(dateInput).toDateString();
+  const localeDate = new Date(dateInput).toLocaleDateString();
+  const goal = state.profile ? calcTDEE(state.profile) : 2000;
+  const net = cal - burned;
+  const deficit = goal - net;
+
+  state.history = state.history || {};
+
+  // Save calorie entry (no duplicate dates)
+  state.history.calories = (state.history.calories || []).filter(c => c.date !== dateStr);
+  state.history.calories.push({ date: dateStr, deficit, net, goal });
+  state.history.calories.sort((a,b) => new Date(a.date) - new Date(b.date));
+  if (state.history.calories.length > 30) state.history.calories.shift();
+
+  // Save weight if provided
+  if (weight) {
+    state.history.weight = (state.history.weight || []).filter(w => w.date !== dateStr);
+    state.history.weight.push({ date: dateStr, weight });
+    state.history.weight.sort((a,b) => new Date(a.date) - new Date(b.date));
+    if (state.history.weight.length > 60) state.history.weight.shift();
+  }
+
+  saveState();
+  renderCharts();
+  document.getElementById('manual-entry-modal').style.display = 'none';
+  showToast('✓ ' + localeDate + ' added to chart');
+}
+
 // ══════════════════════ HELPERS ══════════════════════
 function showToast(msg) {
   const el = document.getElementById('toast');
@@ -1818,8 +1886,9 @@ async function checkDateChange() {
   state.lastDate = today;
   saveState();
 }
-checkDateChange(); // run immediately on load — detects date change even after overnight close
-setInterval(checkDateChange, 60000); // check every minute
+// checkDateChange is called inside init() before renderAll
+// Keep the interval for apps left open overnight
+setInterval(checkDateChange, 60000);
 </script>
 </body>
 </html>
