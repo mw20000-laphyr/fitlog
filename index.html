@@ -1323,6 +1323,1870 @@ function removeCardioItem(name) {
 }
 
 async function finishWorkout() {
+  // Sync gym exercises into state first
+  syncGymToState();
+  if (!state.todayExercises.length && !gymExercises.length) { showToast('No exercises to save'); return; }
+  // Ensure synced
+  if (!state.todayExercises.length) syncGymToState();
+
+  const total = state.todayExercises.reduce((s,e) => s+(e.cal||0), 0);
+  const muscles = [...new Set(state.todayExercises.flatMap(e=>e.muscles||[]))].filter(Boolean).join(', ');
+  const time = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  const sessionNum = (state.todaySessions || []).length + 1;
+
+  // Save per-exercise history (use saveExHistory which exists)
+  gymExercises.forEach(ex => {
+    if (ex.sets && ex.sets.length) saveExHistory(ex.name, ex.sets);
+  });
+
+  // Deep copy exercises BEFORE clearing
+  const sessionExercises = JSON.parse(JSON.stringify(state.todayExercises));
+
+  // Save session to todaySessions
+  state.todaySessions = state.todaySessions || [];
+  state.todaySessions.push({ sessionNum, time, muscles, cal: total, exercises: sessionExercises });
+
+  // Save to workout history for charts
+  state.history = state.history || {};
+  state.history.workouts = state.history.workouts || [];
+  state.history.workouts.push({ date: new Date().toLocaleDateString(), muscles, cal: total, exercises: sessionExercises.length });
+  if (state.history.workouts.length > 30) state.history.workouts.shift();
+
+  // Reset current session
+  gymExercises = [];
+  state.todayExercises = state.todayExercises.filter(e => e.type === 'cardio'); // keep cardio
+  localStorage.removeItem('fitlog_gym_session');
+  saveState();
+
+  // Update UI
+  renderGymList();
+  renderExercises();
+  updateCalorieRing();
+  renderSavedSessions();
+  showToast('Session ' + sessionNum + ' saved! ' + total + ' kcal burned 💪');
+
+  // Log to Sheets — deduplicated by session key
+  state.syncedSessionIds = state.syncedSessionIds || {};
+  const sessionKey = new Date().toDateString() + '_' + sessionNum;
+  if (state.syncedSessionIds[sessionKey]) { return; }
+  state.syncedSessionIds[sessionKey] = true;
+  saveState();
+  const date = new Date().toLocaleDateString();
+  const savedEx = state.todaySessions[state.todaySessions.length-1].exercises;
+  await logToSheets('Workouts', [date, time, '── SESSION ' + sessionNum + ' ──', muscles, '—', '—', '—', '—', '—']);
+  for (const ex of savedEx) {
+    if (ex.type === 'cardio') {
+      await logToSheets('Workouts', [date, time, ex.name, 'Cardio', '—', ex.duration + ' min', ex.distance ? ex.distance + ' km' : '—', ex.intensity, ex.cal]);
+    } else {
+      const rows = ex.setRows || [];
+      const muscleStr = (ex.muscles||[]).join(', ');
+      for (let i = 0; i < rows.length; i++) {
+        await logToSheets('Workouts', [date, time, ex.name, muscleStr, i+1, rows[i].reps, rows[i].weight ? rows[i].weight+'kg' : 'BW', '—', Math.round(ex.cal/rows.length)]);
+      }
+    }
+  }
+  await logToSheets('Workouts', [date, time, '── SESSION '+sessionNum+' TOTAL ──', muscles, savedEx.length+' exercises', '—', '—', '—', total]);
+}
+
+function clearSession() {
+  gymExercises = [];
+  state.todayExercises = [];
+  saveState();
+  renderGymList();
+  renderExercises();
+  updateCalorieRing();
+  showToast('Session cleared');
+}
+
+function renderSavedSessions() {
+  const sessions = state.todaySessions || [];
+  const wrap = document.getElementById('saved-sessions-wrap');
+  const list = document.getElementById('saved-sessions-list');
+  const totalEl = document.getElementById('sessions-cal-total');
+  if (!wrap) return;
+  if (!sessions.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  const grandTotal = sessions.reduce((s,sess) => s + sess.cal, 0);
+  if (totalEl) totalEl.textContent = grandTotal + ' kcal total';
+  if (!list) return;
+  list.innerHTML = sessions.map(function(sess) {
+    var exRows = (sess.exercises || []).map(function(ex) {
+      if (ex.type === 'cardio') {
+        return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">'
+          + '<span>🏃 ' + ex.name + '</span>'
+          + '<span style="color:var(--text3)">' + ex.duration + 'min · ' + ex.cal + 'kcal</span></div>';
+      }
+      var rows = ex.setRows || ex.sets || [];
+      var setsSummary = rows.map(function(r,i) {
+        return 'Set ' + (i+1) + ': ' + r.reps + 'r' + (r.weight ? ' @' + r.weight + 'kg' : '');
+      }).join(' · ');
+      return '<div style="padding:5px 0;border-bottom:1px solid var(--border);">'
+        + '<div style="display:flex;justify-content:space-between;font-size:12px;">'
+        + '<span>💪 ' + ex.name + '</span>'
+        + '<span style="color:var(--blue);font-size:11px;">~' + ex.cal + 'kcal</span></div>'
+        + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + setsSummary + '</div>'
+        + '<div style="font-size:10px;color:var(--text3);text-transform:capitalize;">' + (ex.muscles||[]).join(', ') + '</div></div>';
+    }).join('');
+    return '<div class="card" style="margin-bottom:8px;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      + '<div style="font-weight:700;font-size:14px;">Session ' + sess.sessionNum + '</div>'
+      + '<div style="font-size:12px;color:var(--text3);">' + sess.time + ' · <span style="color:var(--blue)">' + sess.cal + ' kcal</span></div></div>'
+      + exRows
+      + '<div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:capitalize;">Muscles: ' + sess.muscles + '</div></div>';
+  }).join('');
+}
+
+// ══════════════════════ CALORIE RING ══════════════════════
+function updateCalorieRing() {
+  if (!state.profile) return;
+  const goal = calcTDEE(state.profile);
+  const food = state.todayFood.reduce((s,f) => s+f.cal, 0);
+  const burned = state.todayExercises.reduce((s,e) => s+e.cal, 0);
+  const totalProt = state.todayFood.reduce((s,f) => s+(f.prot||0), 0);
+  const protGoal = Math.round(state.profile.weight * 1.6);
+  const protEl = document.getElementById('today-protein');
+  if (protEl) {
+    protEl.textContent = totalProt + 'g / ' + protGoal + 'g';
+    protEl.style.color = totalProt>=protGoal?'var(--accent)':totalProt>=protGoal*0.7?'var(--amber,#ffa500)':'var(--red,#ff6b6b)';
+  }
+  const protFill = document.getElementById('protein-bar-fill');
+  if (protFill) protFill.style.width = Math.min(totalProt/protGoal*100,100)+'%';
+  const net = food - burned;
+  const pct = Math.min(net / goal, 1);
+  const circ = 226;
+  document.getElementById('cal-ring').style.strokeDashoffset = circ - circ * pct;
+  document.getElementById('cal-ring').style.stroke = pct > 1 ? 'var(--red)' : pct > 0.8 ? 'var(--amber)' : 'var(--accent)';
+  document.getElementById('cal-consumed').textContent = net;
+  document.getElementById('cal-goal-disp').textContent = goal;
+  document.getElementById('stat-food').textContent = food;
+  document.getElementById('stat-burned').textContent = burned;
+  const rem = goal - net;
+  document.getElementById('cal-rem-disp').textContent = rem > 0 ? rem + ' kcal remaining' : Math.abs(rem) + ' kcal over';
+  document.getElementById('cal-rem-disp').style.color = rem > 0 ? 'var(--accent)' : 'var(--red)';
+  document.getElementById('food-bar').style.width = Math.min(food/goal*100, 100) + '%';
+  document.getElementById('food-pct').textContent = Math.round(food/goal*100) + '%';
+  document.getElementById('gym-bar').style.width = Math.min(burned/goal*100, 100) + '%';
+  document.getElementById('gym-pct').textContent = Math.round(burned/goal*100) + '%';
+
+  // deficit card
+  const deficit = goal - net;
+  const card = document.getElementById('deficit-card');
+  const num = document.getElementById('deficit-num');
+  const lbl = document.getElementById('deficit-label');
+  const tip = document.getElementById('deficit-tip');
+  if (!food && !burned) {
+    num.textContent = '—';
+    lbl.textContent = 'Log food and workouts to see your balance';
+    card.style.background = 'transparent';
+  } else {
+    num.textContent = (deficit > 0 ? '-' : '+') + Math.abs(deficit) + ' kcal';
+    if (deficit > 0) {
+      num.style.color = 'var(--accent)';
+      lbl.textContent = 'Calorie Deficit 🔥';
+      card.style.background = 'var(--accent-dim)';
+      tip.textContent = deficit > 500 ? 'Great deficit! Make sure you\'re getting enough protein.' : 'Good progress. Stay consistent.';
+    } else {
+      num.style.color = 'var(--red)';
+      lbl.textContent = 'Calorie Surplus 📈';
+      card.style.background = 'var(--red-dim)';
+      tip.textContent = state.profile.goal === 'bulk' ? 'On track for your bulk goal.' : 'Over your goal. Hit the gym or adjust meals.';
+    }
+  }
+}
+
+// ══════════════════════ AI CHAT ══════════════════════
+let aiOpen = false;
+function toggleAI() {
+  aiOpen = !aiOpen;
+  const panel = document.getElementById('ai-panel');
+  if (aiOpen) panel.classList.add('open'); else panel.classList.remove('open');
+}
+
+async function sendAIMessage() {
+  const input = document.getElementById('ai-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  appendMsg(msg, 'user');
+  const thinking = appendMsg('● ● ●', 'ai', true);
+  thinking.classList.add('thinking');
+  const todayCal = state.todayFood.reduce((s,f)=>s+f.cal,0);
+  const todayBurned = state.todayExercises.reduce((s,e)=>s+e.cal,0);
+  const profileCtx = state.profile
+    ? 'User: ' + state.profile.name + ', age ' + state.profile.age + ', weight ' + state.profile.weight + 'kg, height ' + state.profile.height + 'cm, goal: ' + state.profile.goal + ', TDEE: ' + calcTDEE(state.profile) + ' kcal. Today: ' + todayCal + ' kcal eaten, ' + todayBurned + ' kcal burned.'
+    : '';
+  try {
+    const systemPrompt = 'You are FitAI, a motivating personal health and fitness coach. Be concise, warm, practical. ' + profileCtx + ' Give specific actionable advice. Keep responses under 150 words.';
+    const fullPrompt = systemPrompt + '\n\nUser: ' + msg;
+    const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(fullPrompt) + '?model=openai');
+    const text = await res.text();
+    thinking.remove();
+    appendMsg(text, 'ai');
+  } catch(e) {
+    thinking.remove();
+    appendMsg('Having trouble connecting. Try again in a moment.', 'ai');
+  }
+}
+
+function appendMsg(text, type, raw) {
+  const el = document.createElement('div');
+  el.className = 'msg msg-' + type;
+  if (!raw) el.innerHTML = text.replace(/\n/g,'<br>');
+  else el.textContent = text;
+  document.getElementById('ai-messages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth' });
+  return el;
+}
+
+// ══════════════════════ SHEETS ══════════════════════
+async function logToSheets(sheet, row) {
+  const url = state.sheetsUrl;
+  if (!url) return;
+  try {
+    const params = new URLSearchParams({ sheet, row: JSON.stringify(row) });
+    await fetch(url + '?' + params.toString(), { method: 'GET', mode: 'no-cors' });
+  } catch(e) {}
+}
+
+// Sync all today's food that hasn't been synced yet, then send a daily summary row
+async function syncTodayFood() {
+  const url = state.sheetsUrl;
+  if (!url) return;
+  const today = new Date().toDateString();
+  state.syncedFoodIds = state.syncedFoodIds || {};
+
+  // Send any unsynced food items (individual rows)
+  for (let i = 0; i < state.todayFood.length; i++) {
+    const key = today + '_' + i;
+    if (!state.syncedFoodIds[key]) {
+      const f = state.todayFood[i];
+      await logToSheets('Calories', [
+        new Date().toLocaleDateString(), f.time, f.name, f.cal, f.prot, f.carbs, f.meal
+      ]);
+      state.syncedFoodIds[key] = true;
+    }
+  }
+
+  saveState();
+}
+
+// Called once at midnight to push the daily summary
+async function pushDailySummary(dateStr) {
+  const url = state.sheetsUrl;
+  if (!url) return;
+  const totalCal = state.todayFood.reduce((s,f) => s+f.cal, 0);
+  const totalProt = state.todayFood.reduce((s,f) => s+f.prot, 0);
+  const totalCarbs = state.todayFood.reduce((s,f) => s+f.carbs, 0);
+  const goal = state.profile ? calcTDEE(state.profile) : 0;
+  const deficit = goal - totalCal;
+  await logToSheets('Daily Summary', [
+    dateStr || new Date().toLocaleDateString(),
+    totalCal, totalProt, totalCarbs,
+    goal,
+    deficit > 0 ? deficit + ' deficit' : Math.abs(deficit) + ' surplus',
+    state.todayFood.length + ' items'
+  ]);
+}
+
+// Midnight check — runs every minute
+// checkMidnight removed — checkDateChange handles date rollover
+
+function saveSheets() {
+  const url = document.getElementById('sheets-url-input').value.trim();
+  if (!url) { showToast('Please enter your Apps Script URL'); return; }
+  state.sheetsUrl = url;
+  state.syncedFoodIds = {}; // reset so everything resyncs
+  saveState();
+  updateSheetsStatus();
+  syncTodayFood().then(() => showToast('✓ Connected & syncing today\'s food!'));
+}
+
+function updateSheetsStatus() {
+  const connected = !!state.sheetsUrl;
+  ['sheets-dot','sheets-dot2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.className = 'dot ' + (connected ? 'dot-green' : 'dot-gray'); }
+  });
+  const txt = connected ? '✓ Sheets connected' : 'Not connected';
+  ['sheets-status-text','sheets-status2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  });
+  const inp = document.getElementById('sheets-url-input');
+  if (inp && state.sheetsUrl) inp.value = state.sheetsUrl;
+}
+
+// ══════════════════════ PROGRESS CHARTS ══════════════════════
+let weightChart, calChart;
+function renderCharts() {
+  const wEl = document.getElementById('weight-chart');
+  const cEl = document.getElementById('cal-chart');
+  const labels = (state.history.weight || []).slice(-14).map(w => w.date.split(' ').slice(1,3).join(' '));
+  const weights = (state.history.weight || []).slice(-14).map(w => w.weight);
+  const calLabels = (state.history.calories || []).slice(-7).map(c => c.date.split(' ').slice(1,3).join(' '));
+  const deficits = (state.history.calories || []).slice(-7).map(c => c.deficit);
+
+  const chartDefaults = { responsive: true, animation: { duration: 600 }, plugins: { legend: { display: false } },
+    scales: { x: { ticks: { color: '#5a5a6a', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+              y: { ticks: { color: '#5a5a6a', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } } }};
+
+  if (weightChart) weightChart.destroy();
+  weightChart = new Chart(wEl, { type: 'line', data: {
+    labels: labels.length ? labels : ['—'],
+    datasets: [{ data: weights.length ? weights : [0], borderColor: '#6ef08b', backgroundColor: 'rgba(110,240,139,0.08)',
+      borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#6ef08b', tension: 0.4, fill: true }]
+  }, options: { ...chartDefaults, plugins: { ...chartDefaults.plugins } }});
+
+  if (calChart) calChart.destroy();
+  calChart = new Chart(cEl, { type: 'bar', data: {
+    labels: calLabels.length ? calLabels : ['—'],
+    datasets: [{ data: deficits.length ? deficits : [0],
+      backgroundColor: deficits.map(d => d > 0 ? 'rgba(110,240,139,0.5)' : 'rgba(255,107,107,0.5)'),
+      borderColor: deficits.map(d => d > 0 ? '#6ef08b' : '#ff6b6b'),
+      borderWidth: 1, borderRadius: 4 }]
+  }, options: { ...chartDefaults }});
+
+  const wk = (state.history.workouts || []).filter(w => {
+    const d = new Date(w.date); const now = new Date();
+    return (now - d) < 7 * 86400000;
+  });
+  document.getElementById('weekly-workouts').textContent = wk.length;
+  const avgDef = deficits.length ? Math.round(deficits.reduce((a,b)=>a+b,0)/deficits.length) : 0;
+  document.getElementById('avg-deficit').textContent = avgDef || '—';
+}
+
+// ══════════════════════ SETTINGS RENDER ══════════════════════
+function renderSettings() {
+  if (!state.profile) return;
+  const p = state.profile;
+  const gEl = document.getElementById('s-gemini');
+  if (gEl) {
+    gEl.value = state.geminiKey || '';
+    const gs = document.getElementById('gemini-status');
+    if (gs) { gs.textContent = state.geminiKey ? '✓ Key saved' : 'No key saved yet'; gs.style.color = state.geminiKey ? 'var(--accent)' : 'var(--text3)'; }
+  }
+  document.getElementById('s-name').value = p.name || '';
+  document.getElementById('s-age').value = p.age || '';
+  document.getElementById('s-weight').value = p.weight || '';
+  document.getElementById('s-height').value = p.height || '';
+  document.getElementById('s-goal').value = p.goal || 'cut';
+  document.getElementById('s-activity').value = p.activity || '1.55';
+  const bmr = Math.round(10 * p.weight + 6.25 * p.height - 5 * p.age + 5);
+  const tdee = calcTDEE(p);
+  const adj = { cut: '-300 (deficit)', maintain: '+0', bulk: '+300 (surplus)' };
+  document.getElementById('tdee-breakdown').innerHTML =
+    'BMR: ' + bmr + ' kcal\n× Activity (' + p.activity + '): ' + Math.round(bmr*p.activity) + ' kcal\nGoal adj: ' + adj[p.goal] + '\nTarget: ' + tdee + ' kcal/day';
+  renderGymRecs();
+}
+
+function renderGymRecs() {
+  if (!state.profile) return;
+  const goal = state.profile.goal;
+  const recs = {
+    cut: [
+      { icon: '🏃', title: 'Cardio 3x/week', text: '20–30 min HIIT or steady state to boost deficit' },
+      { icon: '💪', title: 'Maintain lifts', text: 'Keep weights heavy to preserve muscle while cutting' },
+      { icon: '🥗', title: 'High protein', text: '1.8–2.2g protein per kg bodyweight daily' }
+    ],
+    bulk: [
+      { icon: '🏋️', title: 'Progressive overload', text: 'Add weight or reps weekly on compound lifts' },
+      { icon: '😴', title: '8h sleep', text: 'Growth hormone peaks during deep sleep' },
+      { icon: '🍗', title: 'Protein timing', text: 'Have 30–40g protein within 1h post-workout' }
+    ],
+    maintain: [
+      { icon: '⚖️', title: 'Balanced training', text: 'Mix strength and cardio 4–5x/week' },
+      { icon: '📊', title: 'Track macros', text: 'Stay within 100 kcal of your TDEE daily' },
+      { icon: '🔄', title: 'Periodise', text: 'Change your programme every 8–12 weeks' }
+    ]
+  };
+  const items = recs[goal] || recs.maintain;
+  document.getElementById('gym-recs-home').innerHTML = items.map(r =>
+    `<div class="rec-item"><div class="rec-icon">${r.icon}</div><div><div class="rec-title">${r.title}</div><div class="rec-text">${r.text}</div></div></div>`
+  ).join('');
+}
+
+// ══════════════════════ MANUAL HISTORY ENTRY ══════════════════════
+function showManualEntry() {
+  const modal = document.getElementById('manual-entry-modal');
+  modal.style.display = modal.style.display === 'none' ? 'block' : 'none';
+  // Default to yesterday
+  const yesterday = new Date(Date.now() - 86400000);
+  document.getElementById('manual-date').value = yesterday.toISOString().split('T')[0];
+}
+
+function saveManualEntry() {
+  const dateInput = document.getElementById('manual-date').value;
+  const cal = parseInt(document.getElementById('manual-cal').value) || 0;
+  const burned = parseInt(document.getElementById('manual-burned').value) || 0;
+  const weight = parseFloat(document.getElementById('manual-weight').value) || 0;
+  if (!dateInput || !cal) { showToast('Enter at least a date and calories'); return; }
+
+  const dateStr = new Date(dateInput).toDateString();
+  const localeDate = new Date(dateInput).toLocaleDateString();
+  const goal = state.profile ? calcTDEE(state.profile) : 2000;
+  const net = cal - burned;
+  const deficit = goal - net;
+
+  state.history = state.history || {};
+
+  // Save calorie entry (no duplicate dates)
+  state.history.calories = (state.history.calories || []).filter(c => c.date !== dateStr);
+  state.history.calories.push({ date: dateStr, deficit, net, goal });
+  state.history.calories.sort((a,b) => new Date(a.date) - new Date(b.date));
+  if (state.history.calories.length > 30) state.history.calories.shift();
+
+  // Save weight if provided
+  if (weight) {
+    state.history.weight = (state.history.weight || []).filter(w => w.date !== dateStr);
+    state.history.weight.push({ date: dateStr, weight });
+    state.history.weight.sort((a,b) => new Date(a.date) - new Date(b.date));
+    if (state.history.weight.length > 60) state.history.weight.shift();
+  }
+
+  saveState();
+  renderCharts();
+  document.getElementById('manual-entry-modal').style.display = 'none';
+  showToast('✓ ' + localeDate + ' added to chart');
+}
+
+// ══════════════════════ HELPERS ══════════════════════
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+  if (name === 'progress') renderCharts();
+  if (name === 'settings') renderSettings();
+  if (name === 'workout') renderExercises();
+}
+
+function resetApp() {
+  if (!confirm('Reset all data? This cannot be undone.')) return;
+  localStorage.removeItem('fitlog_state');
+  location.reload();
+}
+
+function renderAll() {
+  restoreGymSession();
+  if (!state.profile) return;
+  const p = state.profile;
+  const h = new Date().getHours();
+  const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('greeting-name').textContent = greet + ', ' + p.name + ' 👋';
+  document.getElementById('today-date').textContent = new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+  renderSavedSessions();
+  document.getElementById('workout-date-label').textContent = new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+  document.getElementById('profile-info').textContent = `${p.name} · ${p.age}y · ${p.weight}kg · Goal: ${p.goal}`;
+  document.getElementById('update-weight').placeholder = p.weight;
+  renderFood();
+  renderExercises();
+  updateCalorieRing();
+  updateSheetsStatus();
+  // restore muscle pills
+  state.selectedMuscles.forEach(m => {
+    const el = document.querySelector(`[data-muscle="${m}"]`);
+    if (el) el.classList.add('sel');
+  });
+  renderMuscleCoverage();
+  renderWorkoutRecs();
+}
+
+// ══════════════════════ GEMINI KEY HELPERS ══════════════════════
+function saveGeminiKey() {
+  const key = document.getElementById('s-gemini').value.trim();
+  if (!key) { showToast('Please paste your API key'); return; }
+  state.geminiKey = key;
+  saveState();
+  document.getElementById('gemini-status').textContent = '✓ Key saved';
+  document.getElementById('gemini-status').style.color = 'var(--accent)';
+  showToast('Gemini API key saved ✓');
+}
+
+function showGeminiPrompt() {
+  showPage('settings');
+  setTimeout(() => {
+    const el = document.getElementById('s-gemini');
+    if (el) el.focus();
+  }, 300);
+}
+
+// ══════════════════════ BOOT ══════════════════════
+init();
+
+// Date-change detection: fires on load AND every minute
+// Pushes daily summary whenever the date has changed since last check
+async function checkDateChange() {
+  const today = new Date().toDateString();
+  const lastDate = state.lastDate;
+  if (lastDate && lastDate !== today) {
+    // ── Save yesterday to local chart history BEFORE resetting ──
+    if (state.profile) {
+      state.history = state.history || {};
+
+      // Calorie deficit/surplus
+      const net = (state.todayFood || []).reduce((s,f) => s+f.cal, 0)
+                - (state.todayExercises || []).reduce((s,e) => s+e.cal, 0);
+      const goal = calcTDEE(state.profile);
+      const deficit = goal - net;
+      state.history.calories = state.history.calories || [];
+      if (net > 0) {
+        // Avoid duplicate entries for same date
+        state.history.calories = state.history.calories.filter(c => c.date !== lastDate);
+        state.history.calories.push({ date: lastDate, deficit, net, goal });
+        if (state.history.calories.length > 30) state.history.calories.shift();
+      }
+
+      // Weight
+      if (state.todayWeight) {
+        state.history.weight = state.history.weight || [];
+        state.history.weight = state.history.weight.filter(w => w.date !== lastDate);
+        state.history.weight.push({ date: lastDate, weight: state.todayWeight });
+        if (state.history.weight.length > 60) state.history.weight.shift();
+      }
+
+      // Workout sessions count
+      const totalExCal = (state.todayExercises || []).reduce((s,e) => s+e.cal, 0);
+      if ((state.todaySessions || []).length > 0 || totalExCal > 0) {
+        state.history.workouts = state.history.workouts || [];
+        state.history.workouts = state.history.workouts.filter(w => w.date !== lastDate);
+        const muscles = [...new Set((state.todayExercises||[]).flatMap(e=>e.muscles||[]))].join(', ');
+        state.history.workouts.push({ date: lastDate, cal: totalExCal, exercises: (state.todayExercises||[]).length, muscles });
+        if (state.history.workouts.length > 30) state.history.workouts.shift();
+      }
+    }
+
+    // ── Push to Google Sheets ──
+    const prevLocale = new Date(lastDate).toLocaleDateString();
+    await pushDailySummary(prevLocale);
+
+    // ── Reset ALL daily fields ──
+    state.todayFood = [];
+    state.todayExercises = [];
+    state.todaySessions = [];
+    state.syncedFoodIds = {};
+    state.syncedSessionIds = {};
+    state.todayWeight = null;
+    state.currentMeal = 'Breakfast';
+    gymExercises = [];
+    localStorage.removeItem('fitlog_gym_session');
+    saveState();
+    // Re-render everything
+    renderFood();
+    renderExercises();
+    renderSavedSessions();
+    renderGymList();
+    updateCalorieRing();
+    // Reset meal selector UI if present
+    document.querySelectorAll('.meal-pill').forEach(p => p.classList.remove('sel'));
+    const breakfastPill = document.querySelector('.meal-pill[data-meal="Breakfast"]');
+    if (breakfastPill) breakfastPill.classList.add('sel');
+    showToast('🌅 Good morning! New day started');
+  }
+  state.lastDate = today;
+  saveState();
+}
+// checkDateChange is called inside init() before renderAll
+// Keep the interval for apps left open overnight
+setInterval(checkDateChange, 60000);
+</script>
+</body>
+</html>
+
+/* ── NAV ── */
+.nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); z-index: 100; }
+.nav-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 12px; border: none; background: none; color: var(--text3); cursor: pointer; font-family: var(--font); font-size: 10px; letter-spacing: 0.04em; transition: color 0.15s; }
+.nav-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.nav-btn.active { color: var(--accent); }
+.nav-btn.active svg { stroke: var(--accent); }
+
+/* ── PAGES ── */
+.page { display: none; padding: 16px 16px 90px; min-height: 100vh; }
+.page.active { display: block; }
+
+/* ── HEADER ── */
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-top: 8px; }
+.page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; }
+.page-sub { font-size: 12px; color: var(--text3); margin-top: 2px; font-family: var(--mono); }
+
+/* ── CARDS ── */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.card-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+
+/* ── STATS ROW ── */
+.stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.stat-val { font-size: 26px; font-weight: 600; letter-spacing: -1px; }
+.stat-label { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.stat-sub { font-size: 11px; color: var(--text2); margin-top: 4px; font-family: var(--mono); }
+
+/* ── RING ── */
+.ring-wrap { display: flex; align-items: center; gap: 16px; }
+.ring-svg { flex-shrink: 0; }
+.ring-info { flex: 1; }
+.ring-label { font-size: 13px; color: var(--text2); margin-bottom: 2px; }
+.ring-num { font-size: 28px; font-weight: 600; letter-spacing: -1px; }
+.ring-sub { font-size: 11px; color: var(--text3); margin-top: 3px; font-family: var(--mono); }
+
+/* ── INPUTS ── */
+input, select, textarea { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: var(--font); font-size: 15px; padding: 10px 12px; width: 100%; outline: none; transition: border-color 0.15s; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+select option { background: var(--bg3); }
+textarea { resize: vertical; min-height: 80px; }
+label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px; }
+.field { margin-bottom: 12px; }
+
+/* ── BUTTONS ── */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 16px; border-radius: var(--radius-sm); border: none; font-family: var(--font); font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity 0.15s, transform 0.1s; }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--accent); color: #0a1a0e; }
+.btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border2); }
+.btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,107,107,0.2); }
+.btn-full { width: 100%; }
+.btn-sm { padding: 7px 12px; font-size: 12px; }
+
+/* ── TAGS ── */
+.tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.tag-green { background: var(--accent-dim); color: var(--accent); }
+.tag-red { background: var(--red-dim); color: var(--red); }
+.tag-blue { background: var(--blue-dim); color: var(--blue); }
+.tag-amber { background: var(--amber-dim); color: var(--amber); }
+.tag-purple { background: var(--purple-dim); color: var(--purple); }
+
+/* ── PROGRESS BAR ── */
+.progress-bar { height: 6px; background: var(--bg4); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+
+/* ── FOOD LIST ── */
+.food-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.food-item:last-child { border-bottom: none; }
+.food-name { font-size: 14px; font-weight: 500; }
+.food-meta { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.food-cal { font-family: var(--mono); font-size: 14px; color: var(--accent); }
+
+/* ── WORKOUT ── */
+.set-row { display: grid; grid-template-columns: 2fr 1fr 1fr 32px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.set-row input { padding: 8px; font-size: 14px; }
+.del-btn { width: 32px; height: 32px; border-radius: 6px; background: var(--red-dim); border: none; color: var(--red); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.exercise-block { background: var(--bg3); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; border: 1px solid var(--border); }
+.exercise-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.exercise-name { font-size: 15px; font-weight: 600; }
+.muscle-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+/* ── AI CHAT ── */
+.ai-page { display: none; position: fixed; top: 0; right: 0; bottom: 60px; width: 100%; background: var(--bg); z-index: 50; flex-direction: column; }
+.ai-page.open { display: flex; }
+.ai-header { padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--accent-dim); border: 1px solid var(--accent); display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 14px; font-weight: 600; flex-shrink: 0; }
+.ai-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; }
+.msg-ai { background: var(--bg3); color: var(--text); align-self: flex-start; border-bottom-left-radius: 3px; }
+.msg-user { background: var(--accent); color: #0a1a0e; align-self: flex-end; border-bottom-right-radius: 3px; font-weight: 500; }
+.ai-input-row { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+.ai-input-row input { flex: 1; }
+.ai-close { margin-left: auto; background: none; border: none; color: var(--text2); cursor: pointer; font-size: 20px; padding: 4px; }
+
+/* ── SETUP MODAL ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: flex-end; z-index: 200; backdrop-filter: blur(4px); }
+.modal-overlay.hidden { display: none; }
+.modal { background: var(--bg2); border-radius: 20px 20px 0 0; padding: 24px 20px 40px; width: 100%; border-top: 1px solid var(--border2); animation: slide-up 0.3s ease; }
+.cardio-quick-btn{background:var(--bg3);border:1.5px solid var(--border);border-radius:12px;color:var(--text2);font-size:22px;padding:12px 4px;cursor:pointer;text-align:center;line-height:1.6;transition:all 0.15s;width:100%;}
+.cardio-quick-btn span{display:block;font-size:11px;color:var(--text3);margin-top:2px;}
+.cardio-quick-btn:active{border-color:var(--accent);background:rgba(110,240,139,0.1);}
+.muscle-pick-btn{background:var(--bg3);border:2px solid var(--border);border-radius:12px;color:var(--text2);font-size:11px;padding:10px 4px;cursor:pointer;text-align:center;line-height:1.6;transition:all 0.15s;width:100%;}
+.muscle-pick-btn.sel{border-color:var(--accent);background:rgba(110,240,139,0.1);color:var(--accent);}
+.muscle-block{background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;}
+.muscle-block-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.muscle-block-title{font-size:15px;font-weight:700;color:var(--text1);}
+.muscle-block-cal{font-size:12px;color:var(--blue);font-family:var(--mono);}
+.ex-block-item{background:var(--bg3);border-radius:10px;padding:10px;margin-bottom:8px;}
+.ex-block-name{font-size:13px;font-weight:600;color:var(--text1);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
+.last-session-row{font-size:10px;color:var(--text3);padding:3px 6px;background:var(--bg4);border-radius:6px;margin-bottom:6px;border-left:2px solid var(--text3);}
+.last-session-row span{color:var(--amber);}
+.set-input-row{display:grid;grid-template-columns:32px 1fr 1fr 28px;gap:5px;align-items:center;margin-bottom:5px;}
+.set-num{font-size:11px;color:var(--text3);text-align:center;background:var(--bg4);border-radius:5px;padding:5px 0;}
+.set-inp{padding:6px;border-radius:7px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;width:100%;}
+.set-del{background:transparent;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px;}
+.add-ex-row{display:flex;gap:6px;margin-top:8px;}
+.size-btn{background:var(--bg4);border:1.5px solid var(--border);border-radius:8px;color:var(--text2);font-size:10px;padding:6px 2px;cursor:pointer;text-align:center;line-height:1.4;transition:all 0.15s;width:100%;}
+.size-btn span{display:block;font-size:9px;color:var(--text3);margin-top:2px;}
+.size-btn.sel{border-color:var(--accent);background:rgba(110,240,139,0.12);color:var(--accent);}
+.size-btn.sel span{color:var(--accent);}
+@keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.modal-title { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+.modal-sub { font-size: 13px; color: var(--text3); margin-bottom: 20px; }
+
+/* ── CAMERA ── */
+#camera-area { display: none; }
+.photo-preview { width: 100%; border-radius: var(--radius); margin-top: 10px; border: 1px solid var(--border2); }
+
+/* ── SECTION HEADER ── */
+.section-header { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 10px; }
+.section-label { font-size: 13px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* ── DEFICIT CARD ── */
+.deficit-card { border-radius: var(--radius); padding: 20px; text-align: center; }
+.deficit-num { font-size: 42px; font-weight: 600; letter-spacing: -2px; }
+.deficit-label { font-size: 13px; margin-top: 4px; }
+
+/* ── SCROLLABLE TAG ROW ── */
+.tag-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.tag-scroll::-webkit-scrollbar { display: none; }
+.tag-pill { flex-shrink: 0; padding: 6px 14px; border-radius: 20px; background: var(--bg3); border: 1px solid var(--border2); font-size: 12px; cursor: pointer; color: var(--text2); transition: all 0.15s; }
+.tag-pill.sel { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+/* ── SHEETS STATUS ── */
+.sheets-status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot-green { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.dot-red { background: var(--red); }
+.dot-gray { background: var(--text3); }
+
+/* ── RECOMMENDATIONS ── */
+.rec-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.rec-item:last-child { border-bottom: none; }
+.rec-icon { width: 36px; height: 36px; border-radius: 8px; background: var(--purple-dim); display: flex; align-items: center; justify-content: center; color: var(--purple); font-size: 16px; flex-shrink: 0; }
+.rec-text { font-size: 13px; line-height: 1.5; color: var(--text2); }
+.rec-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+
+/* ── LOADING DOT ── */
+@keyframes blink { 0%,100%{opacity:0.3} 50%{opacity:1} }
+.thinking span { display: inline-block; animation: blink 1.2s infinite; }
+.thinking span:nth-child(2){animation-delay:0.2s}
+.thinking span:nth-child(3){animation-delay:0.4s}
+
+/* ── NOTIFICATION TOAST ── */
+.toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-80px); background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 10px 16px; font-size: 13px; z-index: 300; transition: transform 0.3s; white-space: nowrap; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── CALORIE SUMMARY BAR ── */
+.cal-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text2); margin-bottom: 12px; font-family: var(--mono); }
+.cal-bar-fill { flex: 1; height: 4px; background: var(--bg4); border-radius: 2px; overflow: hidden; }
+.cal-bar-inner { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.5s; }
+
+/* ── MUSCLE COVERAGE ── */
+.muscle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.muscle-cell { background: var(--bg3); border-radius: var(--radius-sm); padding: 10px; border: 1px solid var(--border); }
+.muscle-cell.hit { border-color: var(--accent); background: var(--accent-dim); }
+.muscle-cell.partial { border-color: var(--amber); background: var(--amber-dim); }
+.muscle-name { font-size: 12px; font-weight: 500; }
+.muscle-status { font-size: 10px; color: var(--text3); margin-top: 2px; }
+.muscle-cell.hit .muscle-name { color: var(--accent); }
+.muscle-cell.hit .muscle-status { color: var(--accent2); }
+.muscle-cell.partial .muscle-name { color: var(--amber); }
+</style>
+</head>
+<body>
+
+<!-- SETUP MODAL -->
+<div class="modal-overlay" id="setup-modal">
+  <div class="modal">
+    <div style="font-size:28px;margin-bottom:8px;">👋</div>
+    <div class="modal-title">Welcome to FitLog</div>
+    <div class="modal-sub">Let's set up your profile to personalise your tracker.</div>
+    <div class="field"><label>Your Name</label><input id="setup-name" type="text" placeholder="e.g. Alex"></div>
+    <div class="field"><label>Age</label><input id="setup-age" type="number" placeholder="e.g. 25" min="10" max="100"></div>
+    <div class="field"><label>Current Weight (kg)</label><input id="setup-weight" type="number" placeholder="e.g. 75" step="0.1"></div>
+    <div class="field"><label>Height (cm)</label><input id="setup-height" type="number" placeholder="e.g. 175"></div>
+    <div class="field">
+      <label>Goal</label>
+      <select id="setup-goal">
+        <option value="cut">Cut (Lose Fat)</option>
+        <option value="maintain">Maintain</option>
+        <option value="bulk">Bulk (Gain Muscle)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Activity Level</label>
+      <select id="setup-activity">
+        <option value="1.2">Sedentary (desk job)</option>
+        <option value="1.375">Light (1–3x/week gym)</option>
+        <option value="1.55" selected>Moderate (3–5x/week gym)</option>
+        <option value="1.725">Active (6–7x/week)</option>
+        <option value="1.9">Very Active (2x/day)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Gemini API Key <span style="color:var(--text3)">(no longer needed — AI now uses Pollinations)</span></label>
+      <input id="setup-gemini" type="text" placeholder="Not required anymore" disabled style="opacity:0.4">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">Free at aistudio.google.com → Get API Key</div>
+    </div>
+    <div class="field">
+      <label>Google Sheets URL <span style="color:var(--text3)">(optional, for data sync)</span></label>
+      <input id="setup-sheets" type="url" placeholder="https://script.google.com/macros/s/.../exec">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">Paste your Apps Script web app URL. See instructions tab for setup.</div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="saveProfile()" style="margin-top:8px;">
+      Get Started →
+    </button>
+  </div>
+</div>
+
+<!-- AI CHAT PANEL -->
+<div class="ai-page" id="ai-panel">
+  <div class="ai-header">
+    <div class="ai-avatar">AI</div>
+    <div>
+      <div style="font-size:15px;font-weight:600;">FitAI</div>
+      <div style="font-size:11px;color:var(--text3);">Your personal health coach</div>
+    </div>
+    <button class="ai-close" onclick="toggleAI()">✕</button>
+  </div>
+  <div class="ai-messages" id="ai-messages">
+    <div class="msg msg-ai" style="background:var(--accent-dim);border:1px solid rgba(110,240,139,0.2)">
+      Hey! I'm your AI health coach. Ask me anything — nutrition advice, workout tips, recovery, goals, or anything else. 💪
+    </div>
+  </div>
+  <div class="ai-input-row">
+    <input id="ai-input" type="text" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendAIMessage()">
+    <button class="btn btn-primary btn-sm" onclick="sendAIMessage()">↑</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- ══════════════════════════════════ DASHBOARD ══════════════════════════════════ -->
+<div class="page active" id="page-home">
+  <div class="page-header">
+    <div>
+      <div class="page-title" id="greeting-name">Good morning 👋</div>
+      <div class="page-sub" id="today-date"></div>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="toggleAI()">🤖 AI</button>
+  </div>
+
+  <!-- CALORIE RING -->
+  <div class="card">
+    <div class="card-label">Daily Calories</div>
+    <div class="ring-wrap">
+      <svg class="ring-svg" width="90" height="90" viewBox="0 0 90 90">
+        <circle cx="45" cy="45" r="36" fill="none" stroke="var(--bg4)" stroke-width="8"/>
+        <circle cx="45" cy="45" r="36" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"
+          stroke-dasharray="226" stroke-dashoffset="226" id="cal-ring" transform="rotate(-90 45 45)" style="transition:stroke-dashoffset 0.8s ease"/>
+      </svg>
+      <div class="ring-info">
+        <div class="ring-label">Consumed</div>
+        <div class="ring-num"><span id="cal-consumed">0</span></div>
+        <div class="ring-sub">Goal: <span id="cal-goal-disp">—</span> kcal</div>
+        <div class="ring-sub" id="cal-rem-disp" style="color:var(--accent)"></div>
+      </div>
+    </div>
+    <div class="cal-bar">
+      <span>Food</span><div class="cal-bar-fill"><div class="cal-bar-inner" id="food-bar" style="width:0%;background:var(--accent)"></div></div>
+      <span id="food-pct">0%</span>
+    </div>
+    <div class="cal-bar">
+      <span>Gym</span><div class="cal-bar-fill"><div class="cal-bar-inner" id="gym-bar" style="width:0%;background:var(--blue)"></div></div>
+      <span id="gym-pct">0%</span>
+    </div>
+  </div>
+
+  <!-- STATS ROW -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Food Calories</div>
+      <div class="stat-val" id="stat-food">0</div>
+      <div class="stat-sub">kcal eaten</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Burned</div>
+      <div class="stat-val" id="stat-burned" style="color:var(--blue)">0</div>
+      <div class="stat-sub">kcal gym</div>
+    </div>
+  </div>
+  <!-- PROTEIN BAR -->
+  <div class="card" style="padding:12px 14px;margin-bottom:8px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <div style="font-size:12px;color:var(--text3);">🥩 Protein</div>
+      <div style="font-size:12px;font-family:var(--mono);" id="today-protein">0g / 0g protein</div>
+    </div>
+    <div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden;">
+      <div id="protein-bar-fill" style="height:5px;background:var(--accent);border-radius:3px;width:0%;transition:width 0.5s;"></div>
+    </div>
+  </div>
+
+  <!-- DEFICIT CARD -->
+  <div class="card" id="deficit-section">
+    <div class="card-label">Today's Balance <span id="deficit-badge"></span></div>
+    <div class="deficit-card" id="deficit-card">
+      <div class="deficit-num" id="deficit-num">—</div>
+      <div class="deficit-label" id="deficit-label">Log food and workouts to see your balance</div>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center;" id="deficit-tip"></div>
+  </div>
+
+  <!-- QUICK LOG -->
+  <div class="section-header"><div class="section-label">Add Food</div></div>
+  <div class="card">
+
+    <!-- AI RESULT PREVIEW -->
+    <div id="ai-food-preview" style="display:none;background:var(--bg3);border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid var(--accent);position:relative;">
+      <div style="font-size:11px;color:var(--accent);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">AI Detected</div>
+      <div style="font-size:16px;font-weight:600;" id="preview-name">—</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;">
+        <div style="background:var(--bg4);border-radius:8px;padding:8px;text-align:center;">
+          <div style="font-size:18px;font-weight:600;color:var(--accent);" id="preview-cal">—</div>
+          <div style="font-size:10px;color:var(--text3);">kcal</div>
+        </div>
+        <div style="background:var(--bg4);border-radius:8px;padding:8px;text-align:center;">
+          <div style="font-size:18px;font-weight:600;color:var(--blue);" id="preview-prot">—</div>
+          <div style="font-size:10px;color:var(--text3);">protein g</div>
+        </div>
+        <div style="background:var(--bg4);border-radius:8px;padding:8px;text-align:center;">
+          <div style="font-size:18px;font-weight:600;color:var(--amber);" id="preview-carbs">—</div>
+          <div style="font-size:10px;color:var(--text3);">carbs g</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;" id="preview-note"></div>
+      <!-- SIZE SELECTOR -->
+      <div style="margin-top:10px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">Portion size:</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;" id="size-selector">
+          <button class="size-btn" data-mul="0.5" onclick="selectSize(this)">🫙<br><span>Half</span></button>
+          <button class="size-btn sel" data-mul="1.0" onclick="selectSize(this)">🍽️<br><span>1 Serving</span></button>
+          <button class="size-btn" data-mul="1.5" onclick="selectSize(this)">🥣<br><span>Bowl</span></button>
+          <button class="size-btn" data-mul="0.25" onclick="selectSize(this)">🤏<br><span>Bite</span></button>
+          <button class="size-btn" data-mul="2.0" onclick="selectSize(this)">🍱<br><span>Large</span></button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+        <button class="btn btn-secondary btn-sm" onclick="editPreview()">✏️ Edit</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmAddFood()">✓ Add to Log</button>
+      </div>
+    </div>
+
+    <!-- EDIT FIELDS (hidden by default, shown after AI or for manual) -->
+    <div id="manual-fields" style="display:none;">
+      <div class="field"><label>Food name</label><input id="quick-food" type="text" placeholder="e.g. Rice 150g, Chicken breast"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div><label>Calories</label><input id="quick-cal" type="number" placeholder="300"></div>
+        <div><label>Protein (g)</label><input id="quick-prot" type="number" placeholder="25"></div>
+        <div><label>Carbs (g)</label><input id="quick-carbs" type="number" placeholder="40"></div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="addFoodManual()">+ Add to Log</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="hideManual()">Cancel</button>
+    </div>
+
+    <!-- MAIN INPUT METHODS -->
+    <div id="food-input-methods">
+      <!-- TYPE NAME — AI LOOKS UP CALORIES -->
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input id="food-name-input" type="text" placeholder="Type food name (e.g. nasi lemak, banana)" style="flex:1;" onkeydown="if(event.key==='Enter')lookupFood()">
+        <button class="btn btn-primary" onclick="lookupFood()" style="white-space:nowrap;flex-shrink:0;">
+          <span id="lookup-icon">🔍</span>
+        </button>
+      </div>
+
+      <div style="text-align:center;color:var(--text3);font-size:12px;margin:10px 0;">— or —</div>
+
+      <!-- PHOTO -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button class="btn btn-secondary" onclick="document.getElementById('camera-input').click()" style="padding:14px 8px;flex-direction:column;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">📷</span>
+          <span style="font-size:12px;color:var(--text2);">Take Photo</span>
+        </button>
+        <button class="btn btn-secondary" onclick="document.getElementById('gallery-input').click()" style="padding:14px 8px;flex-direction:column;display:flex;align-items:center;gap:4px;border-radius:10px;">
+          <span style="font-size:22px;">🖼️</span>
+          <span style="font-size:12px;color:var(--text2);">Upload Photo</span>
+        </button>
+      </div>
+      <!-- Camera input: opens camera directly on phone -->
+      <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoUpload(event)">
+      <!-- Gallery input: opens photo picker -->
+      <input type="file" id="gallery-input" accept="image/*" style="display:none" onchange="handlePhotoUpload(event)">
+
+      <!-- ANALYZING STATE -->
+      <div id="ai-analyzing" style="display:none;text-align:center;padding:20px 0;">
+        <div style="font-size:28px;margin-bottom:8px;">🤖</div>
+        <div style="font-size:14px;color:var(--text2);">AI is analysing your food...</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px;">Identifying calories, protein & carbs</div>
+      </div>
+
+      <img id="photo-preview" class="photo-preview" style="display:none;margin-top:8px;">
+
+      <button class="btn btn-secondary btn-full btn-sm" onclick="showManual()" style="margin-top:10px;color:var(--text3);">Enter manually instead</button>
+    </div>
+
+    <!-- MEAL SELECTOR (always visible) -->
+    <div style="display:flex;gap:6px;margin-top:12px;overflow-x:auto;padding-bottom:2px;">
+      <div class="tag-pill sel" id="meal-breakfast" onclick="selectMeal('Breakfast',this)">🌅 Breakfast</div>
+      <div class="tag-pill" id="meal-lunch" onclick="selectMeal('Lunch',this)">☀️ Lunch</div>
+      <div class="tag-pill" id="meal-dinner" onclick="selectMeal('Dinner',this)">🌙 Dinner</div>
+      <div class="tag-pill" id="meal-snack" onclick="selectMeal('Snack',this)">🍎 Snack</div>
+    </div>
+  </div>
+
+  <!-- TODAY'S LOG -->
+  <div class="section-header"><div class="section-label">Today's Log</div><div id="meal-cal-total" style="font-size:13px;color:var(--accent);font-family:var(--mono)"></div></div>
+  <div class="card" id="food-log-list">
+    <div style="text-align:center;color:var(--text3);font-size:13px;padding:16px 0;">No food logged yet today</div>
+  </div>
+
+  <!-- PROFILE QUICK UPDATE -->
+  <div class="section-header"><div class="section-label">Profile</div></div>
+  <div class="card">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div><label>Weight (kg)</label><input id="update-weight" type="number" step="0.1" placeholder="75.0"></div>
+      <div style="display:flex;align-items:flex-end;"><button class="btn btn-secondary btn-full btn-sm" onclick="updateWeight()">Update</button></div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-top:8px;" id="profile-info"></div>
+    <div class="sheets-status" style="margin-top:8px;">
+      <div class="dot" id="sheets-dot"></div>
+      <span id="sheets-status-text">Sheets: not connected</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ WORKOUT ══════════════════════════════════ -->
+<div class="page" id="page-workout">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Workout</div>
+      <div class="page-sub" id="workout-date-label"></div>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <div id="workout-cal-disp" style="font-size:12px;color:var(--blue);font-family:var(--mono);align-self:center;"></div>
+      <button class="btn btn-primary btn-sm" onclick="finishWorkout()">✓ Done</button>
+    </div>
+  </div>
+
+  <!-- MODE TABS -->
+  <div style="display:flex;gap:0;background:var(--bg3);border-radius:10px;padding:3px;margin-bottom:14px;">
+    <button id="tab-gym" onclick="setWorkoutMode('gym')"
+      style="flex:1;padding:8px;border:none;border-radius:8px;background:var(--accent);color:#000;font-weight:600;font-size:13px;cursor:pointer;">🏋️ Gym</button>
+    <button id="tab-cardio" onclick="setWorkoutMode('cardio')"
+      style="flex:1;padding:8px;border:none;border-radius:8px;background:transparent;color:var(--text2);font-size:13px;cursor:pointer;">🏃 Cardio</button>
+  </div>
+
+  <!-- ══ GYM MODE ══ -->
+  <div id="gym-mode">
+    <!-- Add exercise row -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input id="ex-name-input" type="text" placeholder="Exercise name e.g. Bench Press"
+        style="flex:1;padding:11px 14px;border-radius:10px;background:var(--bg3);border:1.5px solid var(--border);color:var(--text1);font-size:14px;"
+        onkeydown="if(event.key==='Enter')addGymExercise()">
+      <button onclick="addGymExercise()"
+        style="padding:11px 16px;border-radius:10px;background:var(--accent);color:#000;font-weight:700;font-size:20px;border:none;cursor:pointer;">+</button>
+    </div>
+
+    <!-- Exercise list -->
+    <div id="gym-exercise-list"></div>
+
+    <!-- Empty state -->
+    <div id="gym-empty" style="text-align:center;padding:40px 0;color:var(--text3);">
+      <div style="font-size:36px;margin-bottom:8px;">🏋️</div>
+      <div style="font-size:14px;">Type an exercise and tap + to start</div>
+    </div>
+  </div>
+
+  <!-- ══ CARDIO MODE ══ -->
+  <div id="cardio-mode" style="display:none;">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+      <button class="cardio-quick-btn" onclick="quickCardio('🚶 Walk',4)">🚶<br><span>Walk</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🏃 Run',9)">🏃<br><span>Run</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🚴 Cycle',7)">🚴<br><span>Cycle</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🏊 Swim',8)">🏊<br><span>Swim</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('⛹️ HIIT',12)">⛹️<br><span>HIIT</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🧘 Yoga',3)">🧘<br><span>Yoga</span></button>
+    </div>
+    <div class="card">
+      <input id="cardio-name" type="text" placeholder="Activity name"
+        style="width:100%;padding:10px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;margin-bottom:10px;box-sizing:border-box;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        <div><label style="font-size:11px;color:var(--text3);">Duration (min)</label>
+          <input id="cardio-duration" type="number" placeholder="30" min="1"
+            style="width:100%;padding:9px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;box-sizing:border-box;margin-top:4px;"></div>
+        <div><label style="font-size:11px;color:var(--text3);">Distance km (opt)</label>
+          <input id="cardio-distance" type="number" placeholder="3.0" step="0.1"
+            style="width:100%;padding:9px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;box-sizing:border-box;margin-top:4px;"></div>
+      </div>
+      <select id="cardio-intensity" style="width:100%;padding:9px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:13px;margin-bottom:10px;">
+        <option value="low">🟢 Low — walk, yoga</option>
+        <option value="moderate" selected>🟡 Moderate — jog, cycle</option>
+        <option value="high">🔴 High — run, HIIT</option>
+      </select>
+      <button class="btn btn-primary btn-full" onclick="addCardio()">+ Log Cardio</button>
+    </div>
+    <div id="cardio-list" style="margin-top:8px;"></div>
+  </div>
+
+  <!-- SAVED SESSIONS -->
+  <div id="saved-sessions-wrap" style="display:none;margin-top:20px;">
+    <div class="section-header">
+      <div class="section-label">Saved Sessions Today</div>
+      <div id="sessions-cal-total" style="font-size:13px;color:var(--blue);font-family:var(--mono)"></div>
+    </div>
+    <div id="saved-sessions-list"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ PROGRESS ══════════════════════════════════ -->
+<div class="page" id="page-progress">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Progress</div>
+      <div class="page-sub">Your journey</div>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-secondary btn-sm" onclick="showManualEntry()" title="Add past day data">📝</button>
+      <button class="btn btn-secondary btn-sm" onclick="toggleAI()">🤖 AI</button>
+    </div>
+  </div>
+
+  <!-- MANUAL ENTRY MODAL -->
+  <div id="manual-entry-modal" style="display:none;background:var(--bg3);border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid var(--border);">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">📝 Add Past Day Stats</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div><label style="font-size:11px;color:var(--text3);">Date</label>
+        <input type="date" id="manual-date" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text3);">Calories eaten</label>
+        <input type="number" id="manual-cal" placeholder="e.g. 1800" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text3);">Calories burned (gym)</label>
+        <input type="number" id="manual-burned" placeholder="e.g. 300" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text3);">Weight (kg) optional</label>
+        <input type="number" id="manual-weight" placeholder="e.g. 72.5" step="0.1" style="width:100%;padding:8px;border-radius:8px;background:var(--bg4);border:1px solid var(--border);color:var(--text1);font-size:13px;box-sizing:border-box;margin-top:3px;"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('manual-entry-modal').style.display='none'">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveManualEntry()">Save</button>
+    </div>
+  </div>
+
+  <!-- WEIGHT CHART -->
+  <div class="card">
+    <div class="card-label">Weight History</div>
+    <canvas id="weight-chart" height="160" style="width:100%"></canvas>
+  </div>
+
+  <!-- CALORIE HISTORY -->
+  <div class="card">
+    <div class="card-label">Calorie Deficit / Surplus (7 days)</div>
+    <canvas id="cal-chart" height="140" style="width:100%"></canvas>
+  </div>
+
+  <!-- WEEKLY STATS -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-label">Avg Daily Deficit</div><div class="stat-val" id="avg-deficit">—</div><div class="stat-sub">kcal</div></div>
+    <div class="stat-card"><div class="stat-label">Workouts This Week</div><div class="stat-val" id="weekly-workouts">0</div><div class="stat-sub">sessions</div></div>
+  </div>
+
+  <!-- SHEETS SETUP -->
+  <div class="card">
+    <div class="card-label">Google Sheets Sync</div>
+    <div class="sheets-status" style="margin-bottom:12px;">
+      <div class="dot" id="sheets-dot2"></div>
+      <span id="sheets-status2">Not connected</span>
+    </div>
+    <div class="field"><label>Apps Script Web App URL</label><input id="sheets-url-input" type="url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+    <button class="btn btn-primary btn-full btn-sm" onclick="saveSheets()">Save & Test Connection</button>
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
+      <div class="card-label" style="margin-bottom:8px;">Setup Instructions</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.7;">
+        1. Open <strong style="color:var(--text)">Google Sheets</strong> → Create new sheet named "FitLog"<br>
+        2. Add sheets: <code style="color:var(--accent)">Calories</code>, <code style="color:var(--accent)">Workouts</code>, <code style="color:var(--accent)">Weight</code><br>
+        3. Go to Extensions → Apps Script<br>
+        4. Paste the script below and deploy as Web App<br>
+        5. Copy the URL and paste above
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:10px;margin-top:8px;overflow-x:auto;">
+        <pre style="font-size:10px;color:var(--text2);font-family:var(--mono);white-space:pre-wrap;">function doGet(e){
+  var sheet = e.parameter.sheet;
+  var row = JSON.parse(e.parameter.row);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(sheet);
+  if (!sh) {
+    sh = ss.insertSheet(sheet);
+    // Add headers based on sheet type
+    if (sheet === 'Calories') {
+      sh.appendRow(['Date','Time','Food','Calories','Protein (g)','Carbs (g)','Meal']);
+      sh.getRange(1,1,1,7).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    } else if (sheet === 'Daily Summary') {
+      sh.appendRow(['Date','Total Cal','Total Protein (g)','Total Carbs (g)','Goal (kcal)','Balance','Items']);
+      sh.getRange(1,1,1,7).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    } else if (sheet === 'Workouts') {
+      sh.appendRow(['Date','Time','Exercise','Muscles / Type','Set #','Reps / Duration','Weight / Distance','Intensity','Calories']);
+      sh.getRange(1,1,1,9).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    } else if (sheet === 'Weight') {
+      sh.appendRow(['Date','Weight (kg)']);
+      sh.getRange(1,1,1,2).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#6ef08b');
+    }
+  }
+  // For Daily Summary, update today's row if exists instead of appending
+  if (sheet === 'Daily Summary' && sh.getLastRow() > 1) {
+    var data = sh.getDataRange().getValues();
+    var today = row[0];
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] == today) {
+        sh.getRange(i+1, 1, 1, row.length).setValues([row]);
+        return ContentService.createTextOutput(JSON.stringify({ok:true,updated:true}))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+  }
+  sh.appendRow(row);
+  // Auto-resize columns
+  sh.autoResizeColumns(1, sh.getLastColumn());
+  return ContentService.createTextOutput(JSON.stringify({ok:true}))
+    .setMimeType(ContentService.MimeType.JSON);
+}</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ SETTINGS ══════════════════════════════════ -->
+<div class="page" id="page-settings">
+  <div class="page-header">
+    <div class="page-title">Settings</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Gemini API Key</div>
+    <div class="field">
+      <input id="s-gemini" type="text" placeholder="Paste Gemini API key">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">Free at <strong style="color:var(--accent)">aistudio.google.com</strong> → Get API Key → Create API Key</div>
+    </div>
+    <button class="btn btn-primary btn-full btn-sm" onclick="saveGeminiKey()">Save API Key</button>
+    <div id="gemini-status" style="font-size:12px;color:var(--text3);margin-top:8px;"></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Profile</div>
+    <div class="field"><label>Name</label><input id="s-name" type="text"></div>
+    <div class="field"><label>Age</label><input id="s-age" type="number" min="10" max="100"></div>
+    <div class="field"><label>Weight (kg)</label><input id="s-weight" type="number" step="0.1"></div>
+    <div class="field"><label>Height (cm)</label><input id="s-height" type="number"></div>
+    <div class="field">
+      <label>Goal</label>
+      <select id="s-goal">
+        <option value="cut">Cut (Lose Fat)</option>
+        <option value="maintain">Maintain</option>
+        <option value="bulk">Bulk (Gain Muscle)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Activity Level</label>
+      <select id="s-activity">
+        <option value="1.2">Sedentary</option>
+        <option value="1.375">Light Active</option>
+        <option value="1.55">Moderately Active</option>
+        <option value="1.725">Very Active</option>
+        <option value="1.9">Extra Active</option>
+      </select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;">
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+      <button class="btn btn-danger" onclick="resetApp()">Reset All</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-label">TDEE Calculation</div>
+    <div id="tdee-breakdown" style="font-size:13px;color:var(--text2);line-height:2;font-family:var(--mono)">Load profile first</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Daily Gym Recommendations</div>
+    <div id="gym-recs-home"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ BOTTOM NAV ══════════════════════════════════ -->
+<nav class="nav">
+  <button class="nav-btn active" id="nav-home" onclick="showPage('home')">
+    <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    Home
+  </button>
+  <button class="nav-btn" id="nav-workout" onclick="showPage('workout')">
+    <svg viewBox="0 0 24 24"><path d="M6 5v14M18 5v14M2 9h4M18 9h4M2 15h4M18 15h4"/></svg>
+    Workout
+  </button>
+  <button class="nav-btn" id="nav-progress" onclick="showPage('progress')">
+    <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    Progress
+  </button>
+  <button class="nav-btn" id="nav-settings" onclick="showPage('settings')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Settings
+  </button>
+</nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+// ══════════════════════ STATE ══════════════════════
+let state = {
+  profile: null,
+  // ── Daily (reset each night) ──
+  todayFood: [],
+  todayExercises: [],
+  todaySessions: [],
+  todayWeight: null,
+  currentMeal: 'Breakfast',
+  syncedFoodIds: {},
+  syncedSessionIds: {},
+  // ── Persistent ──
+  lastDate: null,
+  selectedMuscles: [],
+  exerciseHistory: {},
+  geminiKey: '',
+  sheetsUrl: '',
+  history: { weight: [], calories: [], workouts: [] },
+};
+
+const EXERCISE_DB = {
+  Chest: ['Bench Press','Incline Bench Press','Decline Bench Press','Push-Ups','Chest Fly','Cable Crossover','Chest Dip','Pec Deck'],
+  Back: ['Deadlift','Pull-Up','Lat Pulldown','Barbell Row','Seated Cable Row','T-Bar Row','Single-Arm Row','Face Pull'],
+  Shoulders: ['Overhead Press','Lateral Raise','Front Raise','Rear Delt Fly','Arnold Press','Shrugs','Upright Row'],
+  Biceps: ['Barbell Curl','Dumbbell Curl','Hammer Curl','Concentration Curl','Cable Curl','Preacher Curl'],
+  Triceps: ['Tricep Dip','Skull Crusher','Cable Pushdown','Overhead Tricep Extension','Close-Grip Bench'],
+  Legs: ['Squat','Leg Press','Romanian Deadlift','Hack Squat','Leg Extension','Leg Curl','Lunges','Bulgarian Split Squat'],
+  Glutes: ['Hip Thrust','Glute Bridge','Cable Kickback','Sumo Deadlift','Step-Ups'],
+  Core: ['Plank','Cable Crunch','Hanging Leg Raise','Russian Twist','Ab Rollout','Dead Bug'],
+  Calves: ['Standing Calf Raise','Seated Calf Raise','Donkey Calf Raise'],
+  Forearms: ['Wrist Curl','Reverse Curl','Farmer Carry','Dead Hang']
+};
+
+// ══════════════════════ INIT ══════════════════════
+async function init() {
+  const saved = localStorage.getItem('fitlog_state');
+  if (saved) {
+    try { state = JSON.parse(saved); } catch(e) {}
+    resetTodayIfNeeded();
+    // Run date check BEFORE renderAll so yesterday's data is saved first
+    await checkDateChange();
+    if (state.profile) {
+      document.getElementById('setup-modal').classList.add('hidden');
+      renderAll();
+      return;
+    }
+  }
+  document.getElementById('setup-modal').classList.remove('hidden');
+}
+
+function restoreGymSession() {
+  try {
+    const saved = localStorage.getItem('fitlog_gym_session');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length) {
+        gymExercises = parsed.map(ex => ({...ex, analyzing: false}));
+        renderGymList();
+        showToast('Restored your previous session 💪');
+      }
+    }
+  } catch(e) {}
+}
+
+function resetTodayIfNeeded() {
+  // History saving is now handled by checkDateChange which runs on load
+  // This just ensures the date is set correctly for first-time users
+  const today = new Date().toDateString();
+  if (!state.lastDate) {
+    state.lastDate = today;
+    saveState();
+  }
+}
+
+function saveState() {
+  localStorage.setItem('fitlog_state', JSON.stringify(state));
+  // Also persist current in-progress gym session separately so refresh doesn't lose it
+  localStorage.setItem('fitlog_gym_session', JSON.stringify(gymExercises));
+}
+
+// ══════════════════════ PROFILE ══════════════════════
+function saveProfile() {
+  const name = document.getElementById('setup-name').value.trim() || 'User';
+  const age = parseInt(document.getElementById('setup-age').value) || 25;
+  const weight = parseFloat(document.getElementById('setup-weight').value) || 70;
+  const height = parseInt(document.getElementById('setup-height').value) || 170;
+  const goal = document.getElementById('setup-goal').value;
+  const activity = parseFloat(document.getElementById('setup-activity').value);
+  const sheets = document.getElementById('setup-sheets').value.trim();
+
+  const gemini = document.getElementById('setup-gemini').value.trim();
+  state.profile = { name, age, weight, height, goal, activity };
+  state.geminiKey = gemini;
+  state.sheetsUrl = sheets;
+  state.history.weight = state.history.weight || [];
+  state.history.weight.push({ date: new Date().toDateString(), weight });
+  state.lastDate = new Date().toDateString();
+  saveState();
+  document.getElementById('setup-modal').classList.add('hidden');
+  renderAll();
+}
+
+function calcTDEE(p) {
+  const bmr = 10 * p.weight + 6.25 * p.height - 5 * p.age + 5;
+  const tdee = Math.round(bmr * p.activity);
+  const adj = { cut: -300, maintain: 0, bulk: 300 };
+  return tdee + (adj[p.goal] || 0);
+}
+
+function updateWeight() {
+  const w = parseFloat(document.getElementById('update-weight').value);
+  if (!w || !state.profile) return;
+  state.profile.weight = w;
+  state.history.weight = state.history.weight || [];
+  state.history.weight.push({ date: new Date().toDateString(), weight: w });
+  if (state.history.weight.length > 30) state.history.weight.shift();
+  saveState();
+  renderAll();
+  showToast('Weight updated to ' + w + 'kg ✓');
+  logToSheets('Weight', [new Date().toLocaleDateString(), w]);
+}
+
+function saveSettings() {
+  if (!state.profile) return;
+  state.profile.name = document.getElementById('s-name').value || state.profile.name;
+  state.profile.age = parseInt(document.getElementById('s-age').value) || state.profile.age;
+  state.profile.weight = parseFloat(document.getElementById('s-weight').value) || state.profile.weight;
+  state.profile.height = parseInt(document.getElementById('s-height').value) || state.profile.height;
+  state.profile.goal = document.getElementById('s-goal').value;
+  state.profile.activity = parseFloat(document.getElementById('s-activity').value);
+  saveState();
+  renderAll();
+  showToast('Settings saved ✓');
+}
+
+// ══════════════════════ FOOD ══════════════════════
+let currentMeal = 'Breakfast';
+let pendingFood = null;
+
+function selectMeal(meal, el) {
+  currentMeal = meal;
+  document.querySelectorAll('.tag-pill[id^="meal-"]').forEach(p => p.classList.remove('sel'));
+  el.classList.add('sel');
+}
+
+let isLooking = false;
+async function lookupFood() {
+  if (isLooking) return;
+  const name = document.getElementById('food-name-input').value.trim();
+  if (!name) return;
+  isLooking = true;
+  document.getElementById('lookup-icon').textContent = '⏳';
+  document.getElementById('ai-analyzing').style.display = 'block';
+  document.getElementById('food-input-methods').style.opacity = '0.4';
+  try {
+    const prompt = `You are a nutrition expert. Give nutrition info for: "${name}". Return ONLY valid JSON, no markdown, no explanation: {"name":"full food name with portion","calories":000,"protein":00,"carbs":00,"note":"brief serving note e.g. per 100g or 1 cup"}`;
+    const res = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai&json=true`, {
+      method: 'GET'
+    });
+    const txt = await res.text();
+    const match = txt.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Bad response: ' + txt.slice(0,100));
+    const json = JSON.parse(match[0]);
+    showFoodPreview(json);
+  } catch(e) {
+    showToast('❌ ' + e.message);
+  }
+  isLooking = false;
+  document.getElementById('lookup-icon').textContent = '🔍';
+  document.getElementById('ai-analyzing').style.display = 'none';
+  document.getElementById('food-input-methods').style.opacity = '1';
+}
+
+let currentSizeMul = 1.0;
+
+function selectSize(btn) {
+  document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel');
+  currentSizeMul = parseFloat(btn.dataset.mul);
+  if (!pendingFood) return;
+  // Update preview numbers
+  document.getElementById('preview-cal').textContent = Math.round((pendingFood.calories||0) * currentSizeMul);
+  document.getElementById('preview-prot').textContent = Math.round((pendingFood.protein||0) * currentSizeMul);
+  document.getElementById('preview-carbs').textContent = Math.round((pendingFood.carbs||0) * currentSizeMul);
+}
+
+function showFoodPreview(json) {
+  pendingFood = json;
+  currentSizeMul = 1.0;
+  // Reset size selector to 1 serving
+  document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('sel'));
+  const def = document.querySelector('.size-btn[data-mul="1.0"]');
+  if (def) def.classList.add('sel');
+  document.getElementById('preview-name').textContent = json.name || '—';
+  document.getElementById('preview-cal').textContent = json.calories || 0;
+  document.getElementById('preview-prot').textContent = json.protein || 0;
+  document.getElementById('preview-carbs').textContent = json.carbs || 0;
+  document.getElementById('preview-note').textContent = json.note || '';
+  document.getElementById('ai-food-preview').style.display = 'block';
+  document.getElementById('food-name-input').value = '';
+}
+
+function confirmAddFood() {
+  if (!pendingFood) return;
+  const mul = currentSizeMul || 1.0;
+  const sizeName = mul === 0.25 ? ' (bite)' : mul === 0.5 ? ' (half)' : mul === 1.5 ? ' (bowl)' : mul === 2.0 ? ' (large)' : '';
+  commitFood(
+    pendingFood.name + sizeName,
+    Math.round((pendingFood.calories||0) * mul),
+    Math.round((pendingFood.protein||0) * mul),
+    Math.round((pendingFood.carbs||0) * mul)
+  );
+  document.getElementById('ai-food-preview').style.display = 'none';
+  pendingFood = null;
+}
+
+function editPreview() {
+  if (!pendingFood) return;
+  document.getElementById('quick-food').value = pendingFood.name || '';
+  document.getElementById('quick-cal').value = pendingFood.calories || '';
+  document.getElementById('quick-prot').value = pendingFood.protein || '';
+  document.getElementById('quick-carbs').value = pendingFood.carbs || '';
+  document.getElementById('ai-food-preview').style.display = 'none';
+  document.getElementById('manual-fields').style.display = 'block';
+  document.getElementById('food-input-methods').style.display = 'none';
+}
+
+function showManual() {
+  document.getElementById('manual-fields').style.display = 'block';
+  document.getElementById('food-input-methods').style.display = 'none';
+}
+function hideManual() {
+  document.getElementById('manual-fields').style.display = 'none';
+  document.getElementById('food-input-methods').style.display = 'block';
+}
+
+function addFoodManual() {
+  const name = document.getElementById('quick-food').value.trim();
+  const cal = parseInt(document.getElementById('quick-cal').value) || 0;
+  const prot = parseInt(document.getElementById('quick-prot').value) || 0;
+  const carbs = parseInt(document.getElementById('quick-carbs').value) || 0;
+  if (!name && !cal) return;
+  commitFood(name || 'Food', cal, prot, carbs);
+  document.getElementById('quick-food').value = '';
+  document.getElementById('quick-cal').value = '';
+  document.getElementById('quick-prot').value = '';
+  document.getElementById('quick-carbs').value = '';
+  hideManual();
+}
+
+function commitFood(name, cal, prot, carbs) {
+  const item = { name, cal: cal||0, prot: prot||0, carbs: carbs||0, meal: currentMeal, time: new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) };
+  state.todayFood.push(item);
+  saveState();
+  renderFood();
+  updateCalorieRing();
+  showToast(name + ' — ' + cal + ' kcal added ✓');
+  syncTodayFood();
+}
+
+function removeFood(idx) {
+  state.todayFood.splice(idx, 1);
+  saveState(); renderFood(); updateCalorieRing();
+}
+
+function handlePhotoUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  // Reset input so same file can be picked again
+  e.target.value = '';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('photo-preview').src = ev.target.result;
+    document.getElementById('photo-preview').style.display = 'block';
+    analyzeFood(ev.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderFood() {
+  const list = document.getElementById('food-log-list');
+  if (!state.todayFood.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:13px;padding:16px 0;">No food logged yet today</div>';
+    document.getElementById('meal-cal-total').textContent = '';
+    return;
+  }
+  const total = state.todayFood.reduce((s,f) => s+f.cal, 0);
+  document.getElementById('meal-cal-total').textContent = total + ' kcal';
+  list.innerHTML = state.todayFood.map((f,i) => `
+    <div class="food-item">
+      <div>
+        <div class="food-name">${f.name}</div>
+        <div class="food-meta">${f.meal} · ${f.time}${f.prot ? ' · ' + f.prot + 'g protein' : ''}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="food-cal">${f.cal}</div>
+        <button class="del-btn" onclick="removeFood(${i})">×</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ══════════════════════ CAMERA ══════════════════════
+async function analyzeFood(imgData) {
+  // Pollinations doesn't support image input on free tier
+  // Show prompt asking user to type the food name instead
+  document.getElementById('ai-analyzing').style.display = 'none';
+  document.getElementById('food-input-methods').style.opacity = '1';
+  showToast('Photo uploaded! Type the food name below to look up calories.');
+  document.getElementById('food-name-input').focus();
+}
+
+
+// ══════════════════════ GYM ENGINE (Liftoff-style) ══════════════════════
+
+// gymExercises: [{name, sets:[{reps,weight,done}], muscles, calPerSet, analyzing}]
+let gymExercises = [];
+let workoutMode = 'gym';
+
+function setWorkoutMode(mode) {
+  workoutMode = mode;
+  document.getElementById('gym-mode').style.display = mode==='gym' ? 'block' : 'none';
+  document.getElementById('cardio-mode').style.display = mode==='cardio' ? 'block' : 'none';
+  const gymTab = document.getElementById('tab-gym');
+  const cardioTab = document.getElementById('tab-cardio');
+  gymTab.style.background = mode==='gym' ? 'var(--accent)' : 'transparent';
+  gymTab.style.color = mode==='gym' ? '#000' : 'var(--text2)';
+  cardioTab.style.background = mode==='cardio' ? 'var(--accent)' : 'transparent';
+  cardioTab.style.color = mode==='cardio' ? '#000' : 'var(--text2)';
+}
+
+// ── HISTORY ──
+function getExHistory(name) {
+  state.exerciseHistory = state.exerciseHistory || {};
+  // Returns array of sessions: [{date, sets:[{reps,weight}]}, ...]
+  return state.exerciseHistory[name.toLowerCase()] || null;
+}
+function saveExHistory(name, sets) {
+  state.exerciseHistory = state.exerciseHistory || {};
+  const key = name.toLowerCase();
+  const entry = { date: new Date().toLocaleDateString(), sets: sets.map(s=>({reps:s.reps||0,weight:s.weight||0})) };
+  // Support both old format (array of sets) and new format (array of sessions)
+  const existing = state.exerciseHistory[key];
+  if (!existing) {
+    state.exerciseHistory[key] = [entry];
+  } else if (Array.isArray(existing) && existing[0] && existing[0].date) {
+    // Already new format — append, keep last 10 sessions
+    // Don't duplicate same date
+    const filtered = existing.filter(e => e.date !== entry.date);
+    filtered.push(entry);
+    state.exerciseHistory[key] = filtered.slice(-10);
+  } else {
+    // Old format — migrate to new
+    state.exerciseHistory[key] = [entry];
+  }
+}
+function getLastSession(name) {
+  const hist = getExHistory(name);
+  if (!hist) return null;
+  // New format
+  if (hist[0] && hist[0].date) return hist[hist.length-1];
+  // Old format fallback
+  return { date: '—', sets: hist };
+}
+function getAllSessions(name) {
+  const hist = getExHistory(name);
+  if (!hist) return [];
+  if (hist[0] && hist[0].date) return hist;
+  return [{ date: 'Previous', sets: hist }];
+}
+
+// ── ADD EXERCISE ──
+function addGymExercise() {
+  const input = document.getElementById('ex-name-input');
+  const name = input.value.trim();
+  if (!name) return;
+  input.value = '';
+  const hist = getExHistory(name);
+  // Pre-fill from history or defaults
+  const sets = hist
+    ? hist.map(s => ({reps:s.reps, weight:s.weight, done:false}))
+    : [{reps:10,weight:0,done:false},{reps:10,weight:0,done:false},{reps:10,weight:0,done:false}];
+  gymExercises.push({name, sets, muscles:[], calPerSet:6, analyzing:true, expanded:true});
+  renderGymList();
+  analyzeGymExercise(gymExercises.length - 1, name);
+  input.focus();
+}
+
+async function analyzeGymExercise(idx, name) {
+  try {
+    const w = state.profile ? state.profile.weight : 70;
+    const prompt = `Fitness expert. Exercise: "${name}". ${w}kg person, 3x10. Return ONLY JSON: {"muscles":["chest","triceps"],"calories_per_set":8}. muscles from: chest,back,shoulders,biceps,triceps,core,abs,glutes,legs,quads,hamstrings,calves,forearms`;
+    const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai&json=true');
+    const txt = await res.text();
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error();
+    const data = JSON.parse(m[0]);
+    if (gymExercises[idx]) {
+      gymExercises[idx].muscles = data.muscles || [];
+      gymExercises[idx].calPerSet = data.calories_per_set || 6;
+      gymExercises[idx].analyzing = false;
+      recalcGymCal(idx);
+      renderGymList();
+      syncGymToState();
+    }
+  } catch(e) {
+    if (gymExercises[idx]) { gymExercises[idx].analyzing = false; renderGymList(); }
+  }
+}
+
+function recalcGymCal(idx) {
+  const ex = gymExercises[idx];
+  if (!ex) return;
+  ex.cal = ex.sets.reduce((t,s) => {
+    return t + Math.round(ex.calPerSet * (1+(s.weight||0)/150) * ((s.reps||10)/10));
+  }, 0);
+}
+
+// ── RENDER ──
+function renderGymList() {
+  const list = document.getElementById('gym-exercise-list');
+  const empty = document.getElementById('gym-empty');
+  if (!list) return;
+  if (!gymExercises.length) { list.innerHTML=''; if(empty) empty.style.display='block'; updateWorkoutCal(); return; }
+  if(empty) empty.style.display='none';
+
+  list.innerHTML = gymExercises.map((ex, ei) => {
+    const lastSess = getLastSession(ex.name);
+    const allSessions = getAllSessions(ex.name);
+    const muscleStr = ex.analyzing ? '⏳ analyzing...' : (ex.muscles||[]).join(', ') || '—';
+    const muscleColor = ex.analyzing ? 'var(--text3)' : 'var(--accent)';
+
+    // History rows (last 3 sessions, newest first)
+    const histHTML = allSessions.slice(-3).reverse().map((sess, si) => {
+      const setsStr = sess.sets.map(s => s.weight ? s.weight+'kg×'+s.reps : 'BW×'+s.reps).join(' · ');
+      const isLatest = si === 0;
+      return `<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;">
+        <span style="color:var(--text3);">${sess.date}</span>
+        <span style="color:${isLatest?'var(--amber)':'var(--text3)'};">${setsStr}</span>
+      </div>`;
+    }).join('');
+
+    const setsHTML = ex.sets.map((s, si) => {
+      const prev = lastSess && lastSess.sets[si] ? lastSess.sets[si] : null;
+      const prevText = prev ? (prev.weight ? prev.weight+'kg×'+prev.reps : 'BW×'+prev.reps) : '—';
+      return `<div style="display:grid;grid-template-columns:28px 1fr 1fr 80px 28px;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);">
+        <div style="font-size:11px;color:var(--text3);text-align:center;font-weight:600;">${si+1}</div>
+        <input type="number" value="${s.weight||''}" placeholder="kg" min="0" step="0.5"
+          style="padding:7px;border-radius:7px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;width:100%;box-sizing:border-box;text-align:center;"
+          onchange="updateGymSet(${ei},${si},'weight',this.value)">
+        <input type="number" value="${s.reps}" placeholder="reps" min="1"
+          style="padding:7px;border-radius:7px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;width:100%;box-sizing:border-box;text-align:center;"
+          onchange="updateGymSet(${ei},${si},'reps',this.value)">
+        <div style="font-size:10px;color:var(--text3);text-align:center;line-height:1.3;">prev<br><span style="color:var(--amber,#ffa500);">${prevText}</span></div>
+        <button onclick="removeGymSet(${ei},${si})"
+          style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:0;line-height:1;">×</button>
+      </div>`;
+    }).join('');
+
+    return `<div style="background:var(--bg2);border-radius:14px;margin-bottom:10px;overflow:hidden;border:1px solid var(--border);">
+      <!-- Exercise header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--bg3);">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text1);">${ex.name}</div>
+          <div style="font-size:11px;color:${muscleColor};margin-top:2px;text-transform:capitalize;">${muscleStr}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="font-size:12px;color:var(--blue);font-family:var(--mono);">${ex.cal||0} kcal</div>
+          <button onclick="removeGymExercise(${ei})"
+            style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:0;line-height:1;">×</button>
+        </div>
+      </div>
+      <!-- Set headers -->
+      <div style="display:grid;grid-template-columns:28px 1fr 1fr 80px 28px;gap:6px;padding:6px 14px 2px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;">
+        <div style="text-align:center;">Set</div><div style="text-align:center;">kg</div><div style="text-align:center;">Reps</div><div style="text-align:center;">Previous</div><div></div>
+      </div>
+      <!-- Sets -->
+      <div style="padding:0 14px;">${setsHTML}</div>
+      <!-- History accordion -->
+      ${allSessions.length ? '<div style="padding:0 14px"><details style="border-top:1px solid var(--border)"><summary style="font-size:11px;color:var(--text3);padding:8px 0;cursor:pointer">📅 History (' + allSessions.length + ' session' + (allSessions.length!==1?'s':'') + ') ▾</summary><div style="padding-bottom:8px">' + histHTML + '</div></details></div>' : ''}
+      <!-- Add set button -->
+      <button onclick="addGymSet(${ei})"
+        style="width:100%;padding:10px;background:none;border:none;border-top:1px solid var(--border);color:var(--accent);font-size:13px;cursor:pointer;font-weight:600;">
+        + Add Set
+      </button>
+    </div>`;
+  }).join('');
+
+  updateWorkoutCal();
+}
+
+function updateGymSet(ei, si, field, val) {
+  if (!gymExercises[ei]) return;
+  gymExercises[ei].sets[si][field] = field==='weight' ? parseFloat(val)||0 : parseInt(val)||1;
+  recalcGymCal(ei);
+  syncGymToState();
+  updateWorkoutCal();
+}
+
+function addGymSet(ei) {
+  const ex = gymExercises[ei];
+  const last = ex.sets[ex.sets.length-1];
+  ex.sets.push({reps:last.reps, weight:last.weight, done:false});
+  recalcGymCal(ei);
+  renderGymList();
+}
+
+function removeGymSet(ei, si) {
+  if (gymExercises[ei].sets.length <= 1) return;
+  gymExercises[ei].sets.splice(si, 1);
+  recalcGymCal(ei);
+  renderGymList();
+}
+
+function removeGymExercise(ei) {
+  gymExercises.splice(ei, 1);
+  renderGymList();
+  syncGymToState();
+  updateCalorieRing();
+}
+
+function syncGymToState() {
+  state.todayExercises = [
+    ...gymExercises.map(ex => ({...ex, type:'gym', setRows:ex.sets})),
+    ...state.todayExercises.filter(e=>e.type==='cardio')
+  ];
+  saveState();
+}
+
+function updateWorkoutCal() {
+  const total = state.todayExercises.reduce((s,e)=>s+(e.cal||0),0);
+  const el = document.getElementById('workout-cal-disp');
+  if (el) el.textContent = total ? total+' kcal' : '';
+}
+
+function updateBodyMap() { /* body map removed for simplicity */ }
+
+// ── STUBS ──
+function renderMuscleCoverage() {}
+function renderWorkoutRecs() {}
+function toggleMusclePick() {}
+function startGymSession() {}
+function resetGymSession() {}
+function renderMuscleBlocks() {}
+function syncMuscleBlocksToExercises() { syncGymToState(); }
+
+
+function renderExercises() {
+  const total = state.todayExercises.reduce((s,e) => s+e.cal, 0);
+  const dispEl = document.getElementById('workout-cal-disp');
+  if (dispEl) dispEl.textContent = total ? '~' + total + ' kcal burned' : '';
+  const el = document.getElementById('exercise-list');
+  if (!el) return;
+  const cardioItems = state.todayExercises.filter(e => e.type === 'cardio');
+  if (!cardioItems.length) { el.innerHTML = ''; return; }
+  el.innerHTML = cardioItems.map(e => {
+    const detail = e.duration + ' min' + (e.distance ? ' · ' + e.distance + ' km' : '') + ' · ' + e.intensity;
+    return '<div class="exercise-block"><div class="exercise-title"><div>' +
+      '<div class="exercise-name">' + e.name + '</div>' +
+      '<div style="font-size:12px;color:var(--text3);margin-top:2px;">' + detail + ' · <span style="color:var(--blue)">~' + e.cal + ' kcal</span></div>' +
+      '</div><button class="del-btn" onclick="removeCardioItem(\'' + e.name.replace(/'/g,"\\'") + '\')">×</button>' +
+      '</div><span class="tag tag-blue" style="font-size:11px;">🏃 Cardio</span></div>';
+  }).join('');
+}
+
+function removeCardioItem(name) {
+  state.todayExercises = state.todayExercises.filter(e => !(e.type==='cardio' && e.name===name));
+  saveState(); renderExercises(); updateCalorieRing();
+}
+
+async function finishWorkout() {
   syncGymToState();
   if (!state.todayExercises.length) { showToast('No exercises to save'); return; }
   const total = state.todayExercises.reduce((s,e) => s+e.cal, 0);
