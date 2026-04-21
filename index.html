@@ -783,19 +783,10 @@ function restoreGymSession() {
 }
 
 function resetTodayIfNeeded() {
+  // History saving is now handled by checkDateChange which runs on load
+  // This just ensures the date is set correctly for first-time users
   const today = new Date().toDateString();
-  if (state.lastDate !== today) {
-    if (state.lastDate && state.profile) {
-      const net = (state.todayFood || []).reduce((s,f) => s+f.cal, 0) - (state.todayExercises || []).reduce((s,e) => s+e.cal, 0);
-      const goal = calcTDEE(state.profile);
-      const deficit = goal - net;
-      state.history.calories = state.history.calories || [];
-      state.history.calories.push({ date: state.lastDate, deficit, net, goal });
-      if (state.history.calories.length > 30) state.history.calories.shift();
-    }
-    state.todayFood = [];
-    state.todayExercises = [];
-    state.selectedMuscles = [];
+  if (!state.lastDate) {
     state.lastDate = today;
     saveState();
   }
@@ -1558,24 +1549,7 @@ async function pushDailySummary(dateStr) {
 }
 
 // Midnight check — runs every minute
-function checkMidnight() {
-  const now = new Date();
-  if (now.getHours() === 0 && now.getMinutes() === 0) {
-    const yesterday = new Date(now - 86400000).toLocaleDateString();
-    pushDailySummary(yesterday);
-    // Reset daily data
-    state.todayFood = [];
-    state.todayExercises = [];
-    state.todaySessions = [];
-    state.syncedFoodIds = {};
-    saveState();
-    renderFood();
-    renderExercises();
-    renderSavedSessions();
-    updateCalorieRing();
-  }
-}
-setInterval(checkMidnight, 60000);
+// checkMidnight removed — checkDateChange handles date rollover
 
 function saveSheets() {
   const url = document.getElementById('sheets-url-input').value.trim();
@@ -1768,16 +1742,40 @@ async function checkDateChange() {
   const today = new Date().toDateString();
   const lastDate = state.lastDate;
   if (lastDate && lastDate !== today) {
-    // Day has changed — push yesterday's summary
+    // ── Save yesterday to local chart history BEFORE resetting ──
+    if (state.profile) {
+      const net = (state.todayFood || []).reduce((s,f) => s+f.cal, 0)
+                - (state.todayExercises || []).reduce((s,e) => s+e.cal, 0);
+      const goal = calcTDEE(state.profile);
+      const deficit = goal - net;
+      state.history = state.history || {};
+      state.history.calories = state.history.calories || [];
+      // Only save if there's actual data
+      if (net > 0) {
+        state.history.calories.push({ date: lastDate, deficit, net, goal });
+        if (state.history.calories.length > 30) state.history.calories.shift();
+      }
+      // Save weight history if tracked today
+      if (state.todayWeight) {
+        state.history.weight = state.history.weight || [];
+        state.history.weight.push({ date: lastDate, weight: state.todayWeight });
+        if (state.history.weight.length > 60) state.history.weight.shift();
+      }
+    }
+
+    // ── Push to Google Sheets ──
     const prevLocale = new Date(lastDate).toLocaleDateString();
     await pushDailySummary(prevLocale);
-    // Reset daily data
+
+    // ── Reset daily data ──
     state.todayFood = [];
     state.todayExercises = [];
     state.todaySessions = [];
     state.syncedFoodIds = {};
     state.syncedSessionIds = {};
+    state.todayWeight = null;
     gymExercises = [];
+    localStorage.removeItem('fitlog_gym_session');
     saveState();
     renderFood();
     renderExercises();
@@ -1788,7 +1786,7 @@ async function checkDateChange() {
   state.lastDate = today;
   saveState();
 }
-checkDateChange(); // run immediately on load
+checkDateChange(); // run immediately on load — detects date change even after overnight close
 setInterval(checkDateChange, 60000); // check every minute
 </script>
 </body>
