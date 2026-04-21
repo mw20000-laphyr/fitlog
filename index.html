@@ -733,11 +733,21 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
 // ══════════════════════ STATE ══════════════════════
 let state = {
   profile: null,
+  // ── Daily (reset each night) ──
   todayFood: [],
   todayExercises: [],
+  todaySessions: [],
+  todayWeight: null,
+  currentMeal: 'Breakfast',
+  syncedFoodIds: {},
+  syncedSessionIds: {},
+  // ── Persistent ──
+  lastDate: null,
   selectedMuscles: [],
+  exerciseHistory: {},
+  geminiKey: '',
+  sheetsUrl: '',
   history: { weight: [], calories: [], workouts: [] },
-  sheetsUrl: ''
 };
 
 const EXERCISE_DB = {
@@ -1744,22 +1754,37 @@ async function checkDateChange() {
   if (lastDate && lastDate !== today) {
     // ── Save yesterday to local chart history BEFORE resetting ──
     if (state.profile) {
+      state.history = state.history || {};
+
+      // Calorie deficit/surplus
       const net = (state.todayFood || []).reduce((s,f) => s+f.cal, 0)
                 - (state.todayExercises || []).reduce((s,e) => s+e.cal, 0);
       const goal = calcTDEE(state.profile);
       const deficit = goal - net;
-      state.history = state.history || {};
       state.history.calories = state.history.calories || [];
-      // Only save if there's actual data
       if (net > 0) {
+        // Avoid duplicate entries for same date
+        state.history.calories = state.history.calories.filter(c => c.date !== lastDate);
         state.history.calories.push({ date: lastDate, deficit, net, goal });
         if (state.history.calories.length > 30) state.history.calories.shift();
       }
-      // Save weight history if tracked today
+
+      // Weight
       if (state.todayWeight) {
         state.history.weight = state.history.weight || [];
+        state.history.weight = state.history.weight.filter(w => w.date !== lastDate);
         state.history.weight.push({ date: lastDate, weight: state.todayWeight });
         if (state.history.weight.length > 60) state.history.weight.shift();
+      }
+
+      // Workout sessions count
+      const totalExCal = (state.todayExercises || []).reduce((s,e) => s+e.cal, 0);
+      if ((state.todaySessions || []).length > 0 || totalExCal > 0) {
+        state.history.workouts = state.history.workouts || [];
+        state.history.workouts = state.history.workouts.filter(w => w.date !== lastDate);
+        const muscles = [...new Set((state.todayExercises||[]).flatMap(e=>e.muscles||[]))].join(', ');
+        state.history.workouts.push({ date: lastDate, cal: totalExCal, exercises: (state.todayExercises||[]).length, muscles });
+        if (state.history.workouts.length > 30) state.history.workouts.shift();
       }
     }
 
@@ -1767,20 +1792,27 @@ async function checkDateChange() {
     const prevLocale = new Date(lastDate).toLocaleDateString();
     await pushDailySummary(prevLocale);
 
-    // ── Reset daily data ──
+    // ── Reset ALL daily fields ──
     state.todayFood = [];
     state.todayExercises = [];
     state.todaySessions = [];
     state.syncedFoodIds = {};
     state.syncedSessionIds = {};
     state.todayWeight = null;
+    state.currentMeal = 'Breakfast';
     gymExercises = [];
     localStorage.removeItem('fitlog_gym_session');
     saveState();
+    // Re-render everything
     renderFood();
     renderExercises();
     renderSavedSessions();
+    renderGymList();
     updateCalorieRing();
+    // Reset meal selector UI if present
+    document.querySelectorAll('.meal-pill').forEach(p => p.classList.remove('sel'));
+    const breakfastPill = document.querySelector('.meal-pill[data-meal="Breakfast"]');
+    if (breakfastPill) breakfastPill.classList.add('sel');
     showToast('🌅 Good morning! New day started');
   }
   state.lastDate = today;
