@@ -132,6 +132,9 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: flex-end; z-index: 200; backdrop-filter: blur(4px); }
 .modal-overlay.hidden { display: none; }
 .modal { background: var(--bg2); border-radius: 20px 20px 0 0; padding: 24px 20px 40px; width: 100%; border-top: 1px solid var(--border2); animation: slide-up 0.3s ease; }
+.cardio-quick-btn{background:var(--bg3);border:1.5px solid var(--border);border-radius:12px;color:var(--text2);font-size:22px;padding:12px 4px;cursor:pointer;text-align:center;line-height:1.6;transition:all 0.15s;width:100%;}
+.cardio-quick-btn span{display:block;font-size:11px;color:var(--text3);margin-top:2px;}
+.cardio-quick-btn:active{border-color:var(--accent);background:rgba(110,240,139,0.1);}
 .muscle-pick-btn{background:var(--bg3);border:2px solid var(--border);border-radius:12px;color:var(--text2);font-size:11px;padding:10px 4px;cursor:pointer;text-align:center;line-height:1.6;transition:all 0.15s;width:100%;}
 .muscle-pick-btn.sel{border-color:var(--accent);background:rgba(110,240,139,0.1);color:var(--accent);}
 .muscle-block{background:var(--bg2);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;}
@@ -484,142 +487,74 @@ label { font-size: 12px; color: var(--text2); display: block; margin-bottom: 5px
       <div class="page-title">Workout</div>
       <div class="page-sub" id="workout-date-label"></div>
     </div>
-    <button class="btn btn-secondary btn-sm" onclick="toggleAI()">🤖 AI</button>
+    <div style="display:flex;gap:6px;">
+      <div id="workout-cal-disp" style="font-size:12px;color:var(--blue);font-family:var(--mono);align-self:center;"></div>
+      <button class="btn btn-primary btn-sm" onclick="finishWorkout()">✓ Done</button>
+    </div>
   </div>
 
-  <!-- MODE TOGGLE -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-    <button class="btn btn-primary" id="mode-gym-btn" onclick="setWorkoutMode('gym')" style="padding:12px;">🏋️ Gym</button>
-    <button class="btn btn-secondary" id="mode-cardio-btn" onclick="setWorkoutMode('cardio')" style="padding:12px;">🏃 Cardio</button>
+  <!-- MODE TABS -->
+  <div style="display:flex;gap:0;background:var(--bg3);border-radius:10px;padding:3px;margin-bottom:14px;">
+    <button id="tab-gym" onclick="setWorkoutMode('gym')"
+      style="flex:1;padding:8px;border:none;border-radius:8px;background:var(--accent);color:#000;font-weight:600;font-size:13px;cursor:pointer;">🏋️ Gym</button>
+    <button id="tab-cardio" onclick="setWorkoutMode('cardio')"
+      style="flex:1;padding:8px;border:none;border-radius:8px;background:transparent;color:var(--text2);font-size:13px;cursor:pointer;">🏃 Cardio</button>
   </div>
 
-  <!-- GYM MODE -->
+  <!-- ══ GYM MODE ══ -->
   <div id="gym-mode">
-
-    <!-- STEP 1: Pick muscles to train today -->
-    <div class="card" id="muscle-picker-card">
-      <div class="card-label">What are you training today?</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;" id="muscle-picker-grid">
-        <button class="muscle-pick-btn" data-m="Chest" onclick="toggleMusclePick(this)">🫀<br>Chest</button>
-        <button class="muscle-pick-btn" data-m="Back" onclick="toggleMusclePick(this)">🔙<br>Back</button>
-        <button class="muscle-pick-btn" data-m="Shoulders" onclick="toggleMusclePick(this)">💪<br>Shoulders</button>
-        <button class="muscle-pick-btn" data-m="Biceps" onclick="toggleMusclePick(this)">💪<br>Biceps</button>
-        <button class="muscle-pick-btn" data-m="Triceps" onclick="toggleMusclePick(this)">💪<br>Triceps</button>
-        <button class="muscle-pick-btn" data-m="Core" onclick="toggleMusclePick(this)">🔥<br>Core</button>
-        <button class="muscle-pick-btn" data-m="Legs" onclick="toggleMusclePick(this)">🦵<br>Legs</button>
-        <button class="muscle-pick-btn" data-m="Glutes" onclick="toggleMusclePick(this)">🍑<br>Glutes</button>
-        <button class="muscle-pick-btn" data-m="Calves" onclick="toggleMusclePick(this)">🦶<br>Calves</button>
-      </div>
-      <button class="btn btn-primary btn-full" onclick="startGymSession()">Start Workout →</button>
+    <!-- Add exercise row -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input id="ex-name-input" type="text" placeholder="Exercise name e.g. Bench Press"
+        style="flex:1;padding:11px 14px;border-radius:10px;background:var(--bg3);border:1.5px solid var(--border);color:var(--text1);font-size:14px;"
+        onkeydown="if(event.key==='Enter')addGymExercise()">
+      <button onclick="addGymExercise()"
+        style="padding:11px 16px;border-radius:10px;background:var(--accent);color:#000;font-weight:700;font-size:20px;border:none;cursor:pointer;">+</button>
     </div>
 
-    <!-- STEP 2: Muscle blocks (shown after picking) -->
-    <div id="muscle-blocks" style="display:none;">
-      <div id="muscle-blocks-list"></div>
+    <!-- Exercise list -->
+    <div id="gym-exercise-list"></div>
 
-      <!-- Body map -->
-      <div class="card" style="margin-top:12px;">
-        <div class="card-label">Muscle Activation Map</div>
-        <div style="display:flex;gap:12px;align-items:flex-start;">
-          <svg id="body-svg" viewBox="0 0 120 260" style="width:45%;max-width:130px;display:block;">
-            <ellipse cx="60" cy="18" rx="14" ry="16" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect x="54" y="32" width="12" height="10" rx="3" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <ellipse id="bm-shoulders-l" cx="30" cy="50" rx="13" ry="9" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <ellipse id="bm-shoulders-r" cx="90" cy="50" rx="13" ry="9" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <ellipse id="bm-chest" cx="60" cy="58" rx="22" ry="14" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-biceps-l" x="14" y="55" width="11" height="30" rx="5" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-biceps-r" x="95" y="55" width="11" height="30" rx="5" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-forearms-l" x="10" y="88" width="10" height="28" rx="4" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-forearms-r" x="100" y="88" width="10" height="28" rx="4" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-core" x="45" y="72" width="30" height="34" rx="6" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-back" x="42" y="72" width="36" height="30" rx="6" fill="#2a2a3a" stroke="#333" stroke-width="1" opacity="0.6"/>
-            <ellipse id="bm-glutes" cx="60" cy="115" rx="20" ry="12" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-legs-l" x="38" y="124" width="18" height="52" rx="7" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-legs-r" x="64" y="124" width="18" height="52" rx="7" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-calves-l" x="40" y="180" width="14" height="36" rx="6" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <rect id="bm-calves-r" x="66" y="180" width="14" height="36" rx="6" fill="#2a2a3a" stroke="#444" stroke-width="1"/>
-            <text x="60" y="60" text-anchor="middle" font-size="5" fill="#555">Chest</text>
-            <text x="60" y="85" text-anchor="middle" font-size="4.5" fill="#555">Core</text>
-            <text x="60" y="78" text-anchor="middle" font-size="4" fill="#444">Back</text>
-            <text x="19" y="72" text-anchor="middle" font-size="4" fill="#555">Bi</text>
-            <text x="101" y="72" text-anchor="middle" font-size="4" fill="#555">Bi</text>
-            <text x="47" y="152" text-anchor="middle" font-size="4.5" fill="#555">Legs</text>
-            <text x="73" y="152" text-anchor="middle" font-size="4.5" fill="#555">Legs</text>
-          </svg>
-          <div style="flex:1;">
-            <div id="muscle-heat-legend" style="font-size:11px;color:var(--text3);margin-bottom:6px;">Add exercises to see activation</div>
-            <div id="muscle-heat-list"></div>
-          </div>
-        </div>
-      </div>
-
-      <button class="btn btn-secondary btn-sm" onclick="resetGymSession()" style="margin-top:10px;width:100%;color:var(--text3);">← Change Muscles</button>
+    <!-- Empty state -->
+    <div id="gym-empty" style="text-align:center;padding:40px 0;color:var(--text3);">
+      <div style="font-size:36px;margin-bottom:8px;">🏋️</div>
+      <div style="font-size:14px;">Type an exercise and tap + to start</div>
     </div>
   </div>
 
-  <!-- CARDIO MODE -->
+  <!-- ══ CARDIO MODE ══ -->
   <div id="cardio-mode" style="display:none;">
-    <!-- QUICK ACTIVITY BUTTONS -->
-    <div class="card">
-      <div class="card-label">Quick Add Activity</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;">
-        <button class="btn btn-secondary" onclick="quickCardio('🚶 Walk','Walking',4)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
-          <span style="font-size:22px;">🚶</span><span style="font-size:11px;">Walk</span>
-        </button>
-        <button class="btn btn-secondary" onclick="quickCardio('🏃 Run','Running',9)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
-          <span style="font-size:22px;">🏃</span><span style="font-size:11px;">Run</span>
-        </button>
-        <button class="btn btn-secondary" onclick="quickCardio('🚴 Cycle','Cycling',7)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
-          <span style="font-size:22px;">🚴</span><span style="font-size:11px;">Cycle</span>
-        </button>
-        <button class="btn btn-secondary" onclick="quickCardio('🏊 Swim','Swimming',8)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
-          <span style="font-size:22px;">🏊</span><span style="font-size:11px;">Swim</span>
-        </button>
-        <button class="btn btn-secondary" onclick="quickCardio('⛹️ HIIT','HIIT',12)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
-          <span style="font-size:22px;">⛹️</span><span style="font-size:11px;">HIIT</span>
-        </button>
-        <button class="btn btn-secondary" onclick="quickCardio('🧘 Yoga','Yoga',3)" style="flex-direction:column;padding:12px 8px;display:flex;align-items:center;gap:4px;border-radius:10px;">
-          <span style="font-size:22px;">🧘</span><span style="font-size:11px;">Yoga</span>
-        </button>
-      </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+      <button class="cardio-quick-btn" onclick="quickCardio('🚶 Walk',4)">🚶<br><span>Walk</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🏃 Run',9)">🏃<br><span>Run</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🚴 Cycle',7)">🚴<br><span>Cycle</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🏊 Swim',8)">🏊<br><span>Swim</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('⛹️ HIIT',12)">⛹️<br><span>HIIT</span></button>
+      <button class="cardio-quick-btn" onclick="quickCardio('🧘 Yoga',3)">🧘<br><span>Yoga</span></button>
     </div>
-
-    <!-- CARDIO ENTRY FORM -->
     <div class="card">
-      <div class="card-label">Add Cardio</div>
-      <div class="field">
-        <label>Activity</label>
-        <input id="cardio-name" type="text" placeholder="e.g. Morning Walk, Treadmill Run">
+      <input id="cardio-name" type="text" placeholder="Activity name"
+        style="width:100%;padding:10px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;margin-bottom:10px;box-sizing:border-box;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        <div><label style="font-size:11px;color:var(--text3);">Duration (min)</label>
+          <input id="cardio-duration" type="number" placeholder="30" min="1"
+            style="width:100%;padding:9px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;box-sizing:border-box;margin-top:4px;"></div>
+        <div><label style="font-size:11px;color:var(--text3);">Distance km (opt)</label>
+          <input id="cardio-distance" type="number" placeholder="3.0" step="0.1"
+            style="width:100%;padding:9px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;box-sizing:border-box;margin-top:4px;"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-        <div><label>Duration (min)</label><input id="cardio-duration" type="number" placeholder="30" min="1"></div>
-        <div><label>Distance (km) <span style="color:var(--text3)">optional</span></label><input id="cardio-distance" type="number" placeholder="3.0" step="0.1"></div>
-      </div>
-      <div class="field">
-        <label>Intensity</label>
-        <select id="cardio-intensity">
-          <option value="low">Low (leisurely walk, yoga)</option>
-          <option value="moderate" selected>Moderate (brisk walk, light jog)</option>
-          <option value="high">High (running, HIIT, fast cycling)</option>
-        </select>
-      </div>
-      <button class="btn btn-primary btn-full" onclick="addCardio()">+ Add Cardio</button>
+      <select id="cardio-intensity" style="width:100%;padding:9px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:13px;margin-bottom:10px;">
+        <option value="low">🟢 Low — walk, yoga</option>
+        <option value="moderate" selected>🟡 Moderate — jog, cycle</option>
+        <option value="high">🔴 High — run, HIIT</option>
+      </select>
+      <button class="btn btn-primary btn-full" onclick="addCardio()">+ Log Cardio</button>
     </div>
+    <div id="cardio-list" style="margin-top:8px;"></div>
   </div>
 
-  <!-- CURRENT SESSION -->
-  <div class="section-header" style="margin-top:12px;">
-    <div class="section-label">Current Session</div>
-    <div id="workout-cal-disp" style="font-size:13px;color:var(--blue);font-family:var(--mono)"></div>
-  </div>
-  <div id="exercise-list"></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
-    <button class="btn btn-secondary" onclick="clearSession()" style="color:var(--red,#ff6b6b);">🗑 Clear</button>
-    <button class="btn btn-primary" onclick="finishWorkout()">✓ Save Session</button>
-  </div>
-
-  <!-- SAVED SESSIONS TODAY -->
-  <div id="saved-sessions-wrap" style="display:none;margin-top:16px;">
+  <!-- SAVED SESSIONS -->
+  <div id="saved-sessions-wrap" style="display:none;margin-top:20px;">
     <div class="section-header">
       <div class="section-label">Saved Sessions Today</div>
       <div id="sessions-cal-total" style="font-size:13px;color:var(--blue);font-family:var(--mono)"></div>
@@ -833,6 +768,20 @@ function init() {
   document.getElementById('setup-modal').classList.remove('hidden');
 }
 
+function restoreGymSession() {
+  try {
+    const saved = localStorage.getItem('fitlog_gym_session');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length) {
+        gymExercises = parsed.map(ex => ({...ex, analyzing: false}));
+        renderGymList();
+        showToast('Restored your previous session 💪');
+      }
+    }
+  } catch(e) {}
+}
+
 function resetTodayIfNeeded() {
   const today = new Date().toDateString();
   if (state.lastDate !== today) {
@@ -852,7 +801,11 @@ function resetTodayIfNeeded() {
   }
 }
 
-function saveState() { localStorage.setItem('fitlog_state', JSON.stringify(state)); }
+function saveState() {
+  localStorage.setItem('fitlog_state', JSON.stringify(state));
+  // Also persist current in-progress gym session separately so refresh doesn't lose it
+  localStorage.setItem('fitlog_gym_session', JSON.stringify(gymExercises));
+}
 
 // ══════════════════════ PROFILE ══════════════════════
 function saveProfile() {
@@ -1087,271 +1040,239 @@ async function analyzeFood(imgData) {
 }
 
 
-// ══════════════════════ GYM ENGINE ══════════════════════
-const MUSCLE_SVG_MAP = {
-  'chest':['bm-chest'],'back':['bm-back'],
-  'shoulders':['bm-shoulders-l','bm-shoulders-r'],
-  'biceps':['bm-biceps-l','bm-biceps-r'],
-  'triceps':['bm-biceps-l','bm-biceps-r'],
-  'core':['bm-core'],'abs':['bm-core'],
-  'glutes':['bm-glutes'],
-  'legs':['bm-legs-l','bm-legs-r'],
-  'quads':['bm-legs-l','bm-legs-r'],
-  'hamstrings':['bm-legs-l','bm-legs-r'],
-  'calves':['bm-calves-l','bm-calves-r'],
-  'forearms':['bm-forearms-l','bm-forearms-r'],
-};
+// ══════════════════════ GYM ENGINE (Liftoff-style) ══════════════════════
 
+// gymExercises: [{name, sets:[{reps,weight,done}], muscles, calPerSet, analyzing}]
+let gymExercises = [];
 let workoutMode = 'gym';
-let selectedMuscles = [];
-let muscleBlocks = {}; // {Chest: [{name,setRows,muscles,cal,calPerSet},...]}
-let currentExData = null;
 
 function setWorkoutMode(mode) {
   workoutMode = mode;
-  document.getElementById('gym-mode').style.display = mode==='gym'?'block':'none';
-  document.getElementById('cardio-mode').style.display = mode==='cardio'?'block':'none';
-  document.getElementById('mode-gym-btn').className='btn '+(mode==='gym'?'btn-primary':'btn-secondary');
-  document.getElementById('mode-cardio-btn').className='btn '+(mode==='cardio'?'btn-primary':'btn-secondary');
+  document.getElementById('gym-mode').style.display = mode==='gym' ? 'block' : 'none';
+  document.getElementById('cardio-mode').style.display = mode==='cardio' ? 'block' : 'none';
+  const gymTab = document.getElementById('tab-gym');
+  const cardioTab = document.getElementById('tab-cardio');
+  gymTab.style.background = mode==='gym' ? 'var(--accent)' : 'transparent';
+  gymTab.style.color = mode==='gym' ? '#000' : 'var(--text2)';
+  cardioTab.style.background = mode==='cardio' ? 'var(--accent)' : 'transparent';
+  cardioTab.style.color = mode==='cardio' ? '#000' : 'var(--text2)';
 }
 
-// ── EXERCISE HISTORY ──
-function getExerciseHistory(name) {
+// ── HISTORY ──
+function getExHistory(name) {
   state.exerciseHistory = state.exerciseHistory || {};
+  // Returns array of sessions: [{date, sets:[{reps,weight}]}, ...]
   return state.exerciseHistory[name.toLowerCase()] || null;
 }
-function saveExerciseHistory(name, setRows) {
+function saveExHistory(name, sets) {
   state.exerciseHistory = state.exerciseHistory || {};
-  state.exerciseHistory[name.toLowerCase()] = setRows;
-}
-
-// ── MUSCLE PICKER ──
-function toggleMusclePick(btn) {
-  btn.classList.toggle('sel');
-  const m = btn.dataset.m;
-  if (selectedMuscles.includes(m)) {
-    selectedMuscles = selectedMuscles.filter(x => x !== m);
+  const key = name.toLowerCase();
+  const entry = { date: new Date().toLocaleDateString(), sets: sets.map(s=>({reps:s.reps||0,weight:s.weight||0})) };
+  // Support both old format (array of sets) and new format (array of sessions)
+  const existing = state.exerciseHistory[key];
+  if (!existing) {
+    state.exerciseHistory[key] = [entry];
+  } else if (Array.isArray(existing) && existing[0] && existing[0].date) {
+    // Already new format — append, keep last 10 sessions
+    // Don't duplicate same date
+    const filtered = existing.filter(e => e.date !== entry.date);
+    filtered.push(entry);
+    state.exerciseHistory[key] = filtered.slice(-10);
   } else {
-    selectedMuscles.push(m);
+    // Old format — migrate to new
+    state.exerciseHistory[key] = [entry];
   }
 }
-
-function startGymSession() {
-  if (!selectedMuscles.length) { showToast('Pick at least one muscle group'); return; }
-  selectedMuscles.forEach(m => { if (!muscleBlocks[m]) muscleBlocks[m] = []; });
-  document.getElementById('muscle-picker-card').style.display = 'none';
-  document.getElementById('muscle-blocks').style.display = 'block';
-  renderMuscleBlocks();
+function getLastSession(name) {
+  const hist = getExHistory(name);
+  if (!hist) return null;
+  // New format
+  if (hist[0] && hist[0].date) return hist[hist.length-1];
+  // Old format fallback
+  return { date: '—', sets: hist };
+}
+function getAllSessions(name) {
+  const hist = getExHistory(name);
+  if (!hist) return [];
+  if (hist[0] && hist[0].date) return hist;
+  return [{ date: 'Previous', sets: hist }];
 }
 
-function resetGymSession() {
-  document.getElementById('muscle-picker-card').style.display = 'block';
-  document.getElementById('muscle-blocks').style.display = 'none';
-}
-
-// ── RENDER MUSCLE BLOCKS ──
-const MUSCLE_EMOJI = {Chest:'🫀',Back:'🔙',Shoulders:'💪',Biceps:'💪',Triceps:'💪',Core:'🔥',Legs:'🦵',Glutes:'🍑',Calves:'🦶',Forearms:'🤚'};
-
-function renderMuscleBlocks() {
-  const container = document.getElementById('muscle-blocks-list');
-  if (!container) return;
-  container.innerHTML = selectedMuscles.map(muscle => {
-    const exercises = muscleBlocks[muscle] || [];
-    const blockCal = exercises.reduce((s,e)=>s+e.cal,0);
-    const exHTML = exercises.map((ex,ei) => renderExerciseBlock(muscle,ei,ex)).join('');
-    // escape muscle name for safe use in onclick
-    const mSafe = muscle.replace(/'/g,"\'");
-    return `<div class="muscle-block" id="block-${muscle}">
-      <div class="muscle-block-header">
-        <div class="muscle-block-title">${MUSCLE_EMOJI[muscle]||'💪'} ${muscle}</div>
-        <div class="muscle-block-cal" id="block-cal-${muscle}">${blockCal?blockCal+' kcal':''}</div>
-      </div>
-      <div id="block-exercises-${muscle}">${exHTML}</div>
-      <div class="add-ex-row">
-        <input id="ex-input-${muscle}" type="text" placeholder="Add exercise e.g. Lateral Raise..."
-          style="flex:1;padding:8px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:13px;"
-          onkeydown="if(event.key==='Enter')addExerciseToBlock('${mSafe}')">
-        <button class="btn btn-secondary btn-sm" onclick="addExerciseToBlock('${mSafe}')" style="white-space:nowrap;">+ Add</button>
-      </div>
-    </div>`;
-  }).join('');
-  syncMuscleBlocksToExercises();
-  updateBodyMap();
-}
-
-function renderExerciseBlock(muscle, ei, ex) {
-  const history = getExerciseHistory(ex.name);
-  const mSafe = muscle.replace(/'/g,"\'");
-  const nameSafe = ex.name.replace(/'/g,"\'");
-  const histHTML = history
-    ? `<div class="last-session-row">Last: ${history.map((s,i)=>`Set ${i+1}: <span>${s.reps}r${s.weight?' @'+s.weight+'kg':''}</span>`).join(' · ')}</div>`
-    : `<div class="last-session-row" style="color:var(--text3);border-left-color:var(--text3);">No history yet</div>`;
-  const setsHTML = ex.setRows.map((s,si) => `
-    <div class="set-input-row">
-      <div class="set-num">${si+1}</div>
-      <input class="set-inp" type="number" value="${s.reps}" min="1" placeholder="Reps"
-        onchange="updateSet('${mSafe}',${ei},${si},'reps',this.value)">
-      <input class="set-inp" type="number" value="${s.weight||''}" min="0" step="0.5" placeholder="kg"
-        onchange="updateSet('${mSafe}',${ei},${si},'weight',this.value)">
-      <button class="set-del" onclick="removeSet('${mSafe}',${ei},${si})">×</button>
-    </div>`).join('');
-  return `<div class="ex-block-item" id="ex-${muscle}-${ei}">
-    <div class="ex-block-name">
-      <span>${ex.name}${ex.analyzing?' ⏳':''}</span>
-      <button class="set-del" onclick="removeExerciseFromBlock('${mSafe}',${ei})" style="font-size:14px;">🗑</button>
-    </div>
-    ${histHTML}
-    <div id="sets-${muscle}-${ei}">${setsHTML}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-      <button class="btn btn-secondary btn-sm" onclick="addSetToBlock('${mSafe}',${ei})" style="font-size:11px;">+ Set</button>
-      <div style="font-size:11px;color:var(--blue);" id="ex-cal-${muscle}-${ei}">~${ex.cal} kcal</div>
-    </div>
-  </div>`;
-}
-
-async function addExerciseToBlock(muscle) {
-  const input = document.getElementById('ex-input-' + muscle);
-  if (!input) return;
+// ── ADD EXERCISE ──
+function addGymExercise() {
+  const input = document.getElementById('ex-name-input');
   const name = input.value.trim();
-  if (!name) { showToast('Enter an exercise name'); return; }
+  if (!name) return;
   input.value = '';
-  const defaultSets = [{reps:10,weight:0},{reps:10,weight:0},{reps:10,weight:0}];
-  // Prefill from history if available
-  const hist = getExerciseHistory(name);
-  const sets = hist ? hist.map(s=>({reps:s.reps,weight:s.weight})) : defaultSets;
-  const ex = { name, setRows: sets, muscles:[muscle.toLowerCase()], cal:0, calPerSet:6, analyzing:true };
-  if (!muscleBlocks[muscle]) muscleBlocks[muscle] = [];
-  muscleBlocks[muscle].push(ex);
-  renderMuscleBlocks();
-  // AI analyze in background
-  const ei = muscleBlocks[muscle].length - 1;
-  analyzeExerciseForBlock(muscle, ei, name);
+  const hist = getExHistory(name);
+  // Pre-fill from history or defaults
+  const sets = hist
+    ? hist.map(s => ({reps:s.reps, weight:s.weight, done:false}))
+    : [{reps:10,weight:0,done:false},{reps:10,weight:0,done:false},{reps:10,weight:0,done:false}];
+  gymExercises.push({name, sets, muscles:[], calPerSet:6, analyzing:true, expanded:true});
+  renderGymList();
+  analyzeGymExercise(gymExercises.length - 1, name);
+  input.focus();
 }
 
-async function analyzeExerciseForBlock(muscle, ei, name) {
+async function analyzeGymExercise(idx, name) {
   try {
-    const weight = state.profile ? state.profile.weight : 70;
-    const prompt = `Fitness expert. Exercise: "${name}". Person ${weight}kg, 3 sets 10 reps. Return ONLY JSON no extra text: {"muscles":["chest","triceps"],"calories_per_set":8}. muscles only from: chest,back,shoulders,biceps,triceps,core,abs,glutes,legs,quads,hamstrings,calves,forearms`;
+    const w = state.profile ? state.profile.weight : 70;
+    const prompt = `Fitness expert. Exercise: "${name}". ${w}kg person, 3x10. Return ONLY JSON: {"muscles":["chest","triceps"],"calories_per_set":8}. muscles from: chest,back,shoulders,biceps,triceps,core,abs,glutes,legs,quads,hamstrings,calves,forearms`;
     const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai&json=true');
     const txt = await res.text();
-    const match = txt.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('no json');
-    const data = JSON.parse(match[0]);
-    if (muscleBlocks[muscle] && muscleBlocks[muscle][ei]) {
-      muscleBlocks[muscle][ei].muscles = data.muscles || [muscle.toLowerCase()];
-      muscleBlocks[muscle][ei].calPerSet = data.calories_per_set || 6;
-      muscleBlocks[muscle][ei].analyzing = false;
-      recalcExerciseCal(muscle, ei);
-      renderMuscleBlocks();
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error();
+    const data = JSON.parse(m[0]);
+    if (gymExercises[idx]) {
+      gymExercises[idx].muscles = data.muscles || [];
+      gymExercises[idx].calPerSet = data.calories_per_set || 6;
+      gymExercises[idx].analyzing = false;
+      recalcGymCal(idx);
+      renderGymList();
+      syncGymToState();
     }
   } catch(e) {
-    if (muscleBlocks[muscle] && muscleBlocks[muscle][ei]) {
-      muscleBlocks[muscle][ei].analyzing = false;
-      renderMuscleBlocks();
-    }
+    if (gymExercises[idx]) { gymExercises[idx].analyzing = false; renderGymList(); }
   }
 }
 
-function recalcExerciseCal(muscle, ei) {
-  const ex = muscleBlocks[muscle] && muscleBlocks[muscle][ei];
+function recalcGymCal(idx) {
+  const ex = gymExercises[idx];
   if (!ex) return;
-  const cps = ex.calPerSet || 6;
-  ex.cal = ex.setRows.reduce((total,s) => {
-    const wMod = 1 + (s.weight||0)/150;
-    const rMod = (s.reps||10)/10;
-    return total + Math.round(cps * wMod * rMod);
+  ex.cal = ex.sets.reduce((t,s) => {
+    return t + Math.round(ex.calPerSet * (1+(s.weight||0)/150) * ((s.reps||10)/10));
   }, 0);
 }
 
-function updateSet(muscle, ei, si, field, value) {
-  if (!muscleBlocks[muscle] || !muscleBlocks[muscle][ei]) return;
-  muscleBlocks[muscle][ei].setRows[si][field] = field==='weight' ? parseFloat(value)||0 : parseInt(value)||1;
-  recalcExerciseCal(muscle, ei);
-  // Update cal display
-  const calEl = document.getElementById('ex-cal-'+muscle+'-'+ei);
-  if (calEl) calEl.textContent = '~'+muscleBlocks[muscle][ei].cal+' kcal';
-  const blockCal = (muscleBlocks[muscle]||[]).reduce((s,e)=>s+e.cal,0);
-  const blockCalEl = document.getElementById('block-cal-'+muscle);
-  if (blockCalEl) blockCalEl.textContent = blockCal?blockCal+' kcal':'';
-  syncMuscleBlocksToExercises();
+// ── RENDER ──
+function renderGymList() {
+  const list = document.getElementById('gym-exercise-list');
+  const empty = document.getElementById('gym-empty');
+  if (!list) return;
+  if (!gymExercises.length) { list.innerHTML=''; if(empty) empty.style.display='block'; updateWorkoutCal(); return; }
+  if(empty) empty.style.display='none';
+
+  list.innerHTML = gymExercises.map((ex, ei) => {
+    const lastSess = getLastSession(ex.name);
+    const allSessions = getAllSessions(ex.name);
+    const muscleStr = ex.analyzing ? '⏳ analyzing...' : (ex.muscles||[]).join(', ') || '—';
+    const muscleColor = ex.analyzing ? 'var(--text3)' : 'var(--accent)';
+
+    // History rows (last 3 sessions, newest first)
+    const histHTML = allSessions.slice(-3).reverse().map((sess, si) => {
+      const setsStr = sess.sets.map(s => s.weight ? s.weight+'kg×'+s.reps : 'BW×'+s.reps).join(' · ');
+      const isLatest = si === 0;
+      return `<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;">
+        <span style="color:var(--text3);">${sess.date}</span>
+        <span style="color:${isLatest?'var(--amber)':'var(--text3)'};">${setsStr}</span>
+      </div>`;
+    }).join('');
+
+    const setsHTML = ex.sets.map((s, si) => {
+      const prev = lastSess && lastSess.sets[si] ? lastSess.sets[si] : null;
+      const prevText = prev ? (prev.weight ? prev.weight+'kg×'+prev.reps : 'BW×'+prev.reps) : '—';
+      return `<div style="display:grid;grid-template-columns:28px 1fr 1fr 80px 28px;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);">
+        <div style="font-size:11px;color:var(--text3);text-align:center;font-weight:600;">${si+1}</div>
+        <input type="number" value="${s.weight||''}" placeholder="kg" min="0" step="0.5"
+          style="padding:7px;border-radius:7px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;width:100%;box-sizing:border-box;text-align:center;"
+          onchange="updateGymSet(${ei},${si},'weight',this.value)">
+        <input type="number" value="${s.reps}" placeholder="reps" min="1"
+          style="padding:7px;border-radius:7px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:14px;width:100%;box-sizing:border-box;text-align:center;"
+          onchange="updateGymSet(${ei},${si},'reps',this.value)">
+        <div style="font-size:10px;color:var(--text3);text-align:center;line-height:1.3;">prev<br><span style="color:var(--amber,#ffa500);">${prevText}</span></div>
+        <button onclick="removeGymSet(${ei},${si})"
+          style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:0;line-height:1;">×</button>
+      </div>`;
+    }).join('');
+
+    return `<div style="background:var(--bg2);border-radius:14px;margin-bottom:10px;overflow:hidden;border:1px solid var(--border);">
+      <!-- Exercise header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--bg3);">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text1);">${ex.name}</div>
+          <div style="font-size:11px;color:${muscleColor};margin-top:2px;text-transform:capitalize;">${muscleStr}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="font-size:12px;color:var(--blue);font-family:var(--mono);">${ex.cal||0} kcal</div>
+          <button onclick="removeGymExercise(${ei})"
+            style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:0;line-height:1;">×</button>
+        </div>
+      </div>
+      <!-- Set headers -->
+      <div style="display:grid;grid-template-columns:28px 1fr 1fr 80px 28px;gap:6px;padding:6px 14px 2px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;">
+        <div style="text-align:center;">Set</div><div style="text-align:center;">kg</div><div style="text-align:center;">Reps</div><div style="text-align:center;">Previous</div><div></div>
+      </div>
+      <!-- Sets -->
+      <div style="padding:0 14px;">${setsHTML}</div>
+      <!-- History accordion -->
+      ${allSessions.length ? '<div style="padding:0 14px"><details style="border-top:1px solid var(--border)"><summary style="font-size:11px;color:var(--text3);padding:8px 0;cursor:pointer">📅 History (' + allSessions.length + ' session' + (allSessions.length!==1?'s':'') + ') ▾</summary><div style="padding-bottom:8px">' + histHTML + '</div></details></div>' : ''}
+      <!-- Add set button -->
+      <button onclick="addGymSet(${ei})"
+        style="width:100%;padding:10px;background:none;border:none;border-top:1px solid var(--border);color:var(--accent);font-size:13px;cursor:pointer;font-weight:600;">
+        + Add Set
+      </button>
+    </div>`;
+  }).join('');
+
+  updateWorkoutCal();
+}
+
+function updateGymSet(ei, si, field, val) {
+  if (!gymExercises[ei]) return;
+  gymExercises[ei].sets[si][field] = field==='weight' ? parseFloat(val)||0 : parseInt(val)||1;
+  recalcGymCal(ei);
+  syncGymToState();
+  updateWorkoutCal();
+}
+
+function addGymSet(ei) {
+  const ex = gymExercises[ei];
+  const last = ex.sets[ex.sets.length-1];
+  ex.sets.push({reps:last.reps, weight:last.weight, done:false});
+  recalcGymCal(ei);
+  renderGymList();
+}
+
+function removeGymSet(ei, si) {
+  if (gymExercises[ei].sets.length <= 1) return;
+  gymExercises[ei].sets.splice(si, 1);
+  recalcGymCal(ei);
+  renderGymList();
+}
+
+function removeGymExercise(ei) {
+  gymExercises.splice(ei, 1);
+  renderGymList();
+  syncGymToState();
   updateCalorieRing();
-  updateBodyMap();
 }
 
-function addSetToBlock(muscle, ei) {
-  const ex = muscleBlocks[muscle][ei];
-  const last = ex.setRows[ex.setRows.length-1];
-  ex.setRows.push({reps:last.reps, weight:last.weight});
-  recalcExerciseCal(muscle, ei);
-  renderMuscleBlocks();
-}
-
-function removeSet(muscle, ei, si) {
-  if (muscleBlocks[muscle][ei].setRows.length <= 1) return;
-  muscleBlocks[muscle][ei].setRows.splice(si, 1);
-  recalcExerciseCal(muscle, ei);
-  renderMuscleBlocks();
-}
-
-function removeExerciseFromBlock(muscle, ei) {
-  muscleBlocks[muscle].splice(ei, 1);
-  renderMuscleBlocks();
-  syncMuscleBlocksToExercises();
-  updateCalorieRing();
-}
-
-function syncMuscleBlocksToExercises() {
-  state.todayExercises = [];
-  Object.values(muscleBlocks).forEach(exList => exList.forEach(ex => state.todayExercises.push(ex)));
+function syncGymToState() {
+  state.todayExercises = [
+    ...gymExercises.map(ex => ({...ex, type:'gym', setRows:ex.sets})),
+    ...state.todayExercises.filter(e=>e.type==='cardio')
+  ];
   saveState();
 }
 
-function updateBodyMap() {
-  Object.values(MUSCLE_SVG_MAP).flat().forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.setAttribute('fill','#2a2a3a');
-  });
-  const muscleCounts = {};
-  state.todayExercises.forEach(ex => {
-    (ex.muscles||[]).forEach(m => { muscleCounts[m]=(muscleCounts[m]||0)+1; });
-  });
-  const maxHits = Math.max(...Object.values(muscleCounts), 1);
-  const heatList = [];
-  Object.entries(muscleCounts).forEach(([muscle,count]) => {
-    const intensity = count/maxHits;
-    const r = Math.round(42+intensity*213);
-    const g = Math.round(42-intensity*32);
-    const b = Math.round(58-intensity*40);
-    (MUSCLE_SVG_MAP[muscle.toLowerCase()]||[]).forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.setAttribute('fill',`rgb(${r},${g},${b})`);
-    });
-    heatList.push({muscle,count,intensity});
-  });
-  const legend = document.getElementById('muscle-heat-legend');
-  const list = document.getElementById('muscle-heat-list');
-  if (!legend||!list) return;
-  if (!heatList.length) { legend.textContent='Add exercises to see activation'; list.innerHTML=''; return; }
-  legend.textContent='Muscles worked:';
-  heatList.sort((a,b)=>b.count-a.count);
-  list.innerHTML = heatList.map(h => {
-    const pct = Math.round(h.intensity*100);
-    const col = h.intensity>0.7?'var(--red,#ff4444)':h.intensity>0.4?'var(--amber,#ffa500)':'var(--accent)';
-    return `<div style="margin-bottom:5px;">
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">
-        <span style="text-transform:capitalize;">${h.muscle}</span>
-        <span style="color:${col};font-size:10px;">${h.count}x</span>
-      </div>
-      <div style="height:3px;background:var(--bg3);border-radius:2px;">
-        <div style="height:3px;width:${pct}%;background:${col};border-radius:2px;"></div>
-      </div>
-    </div>`;
-  }).join('');
+function updateWorkoutCal() {
+  const total = state.todayExercises.reduce((s,e)=>s+(e.cal||0),0);
+  const el = document.getElementById('workout-cal-disp');
+  if (el) el.textContent = total ? total+' kcal' : '';
 }
 
-// Stubs for old references
+function updateBodyMap() { /* body map removed for simplicity */ }
+
+// ── STUBS ──
 function renderMuscleCoverage() {}
 function renderWorkoutRecs() {}
+function toggleMusclePick() {}
+function startGymSession() {}
+function resetGymSession() {}
+function renderMuscleBlocks() {}
+function syncMuscleBlocksToExercises() { syncGymToState(); }
+
 
 function renderExercises() {
   const total = state.todayExercises.reduce((s,e) => s+e.cal, 0);
@@ -1377,7 +1298,7 @@ function removeCardioItem(name) {
 }
 
 async function finishWorkout() {
-  syncMuscleBlocksToExercises();
+  syncGymToState();
   if (!state.todayExercises.length) { showToast('No exercises to save'); return; }
   const total = state.todayExercises.reduce((s,e) => s+e.cal, 0);
   const muscles = [...new Set(state.todayExercises.flatMap(e=>e.muscles||[e.muscle||'']))].join(', ');
@@ -1398,17 +1319,19 @@ async function finishWorkout() {
   state.history.workouts.push({ date: new Date().toLocaleDateString(), muscles, cal: total, exercises: state.todayExercises.length });
   if (state.history.workouts.length > 30) state.history.workouts.shift();
 
-  // Reset gym UI
-  muscleBlocks = {};
-  selectedMuscles = [];
-  document.querySelectorAll('.muscle-pick-btn').forEach(b => b.classList.remove('sel'));
+  // Save exercise history
+  gymExercises.forEach(ex => {
+    if (ex.sets && ex.sets.length) saveExHistory(ex.name, ex.sets);
+  });
+  // Reset
+  gymExercises = [];
   state.todayExercises = [];
+  localStorage.removeItem('fitlog_gym_session');
   saveState();
-  updateBodyMap();
+  renderGymList();
   renderExercises();
   updateCalorieRing();
   renderSavedSessions();
-  resetGymSession();
   showToast('Session ' + sessionNum + ' saved! ' + total + ' kcal burned 💪');
 
   // Log to Sheets — deduplicated by session key
@@ -1435,15 +1358,12 @@ async function finishWorkout() {
 }
 
 function clearSession() {
-  muscleBlocks = {};
-  selectedMuscles = [];
-  document.querySelectorAll('.muscle-pick-btn').forEach(b => b.classList.remove('sel'));
+  gymExercises = [];
   state.todayExercises = [];
   saveState();
-  updateBodyMap();
+  renderGymList();
   renderExercises();
   updateCalorieRing();
-  resetGymSession();
   showToast('Session cleared');
 }
 
@@ -1452,37 +1372,36 @@ function renderSavedSessions() {
   const wrap = document.getElementById('saved-sessions-wrap');
   const list = document.getElementById('saved-sessions-list');
   const totalEl = document.getElementById('sessions-cal-total');
+  if (!wrap) return;
   if (!sessions.length) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
   const grandTotal = sessions.reduce((s,sess) => s + sess.cal, 0);
-  totalEl.textContent = grandTotal + ' kcal total';
-  list.innerHTML = sessions.map((sess, si) => {
-    const exRows = sess.exercises.map(ex => {
+  if (totalEl) totalEl.textContent = grandTotal + ' kcal total';
+  if (!list) return;
+  list.innerHTML = sessions.map(function(sess) {
+    var exRows = (sess.exercises || []).map(function(ex) {
       if (ex.type === 'cardio') {
-        return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">
-          <span>🏃 ${ex.name}</span>
-          <span style="color:var(--text3)">${ex.duration}min · ${ex.cal}kcal</span>
-        </div>`;
+        return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">'
+          + '<span>🏃 ' + ex.name + '</span>'
+          + '<span style="color:var(--text3)">' + ex.duration + 'min · ' + ex.cal + 'kcal</span></div>';
       }
-      const rows = ex.setRows || [];
-      const setsSummary = rows.map((r,i) => `Set ${i+1}: ${r.reps}r${r.weight ? ' @'+r.weight+'kg' : ''}`).join(' · ');
-      return `<div style="padding:4px 0;border-bottom:1px solid var(--border);">
-        <div style="display:flex;justify-content:space-between;font-size:12px;">
-          <span>💪 ${ex.name}</span>
-          <span style="color:var(--blue);font-size:11px;">~${ex.cal}kcal</span>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${setsSummary}</div>
-        <div style="font-size:10px;color:var(--text3);text-transform:capitalize;">${(ex.muscles||[]).join(', ')}</div>
-      </div>`;
+      var rows = ex.setRows || ex.sets || [];
+      var setsSummary = rows.map(function(r,i) {
+        return 'Set ' + (i+1) + ': ' + r.reps + 'r' + (r.weight ? ' @' + r.weight + 'kg' : '');
+      }).join(' · ');
+      return '<div style="padding:5px 0;border-bottom:1px solid var(--border);">'
+        + '<div style="display:flex;justify-content:space-between;font-size:12px;">'
+        + '<span>💪 ' + ex.name + '</span>'
+        + '<span style="color:var(--blue);font-size:11px;">~' + ex.cal + 'kcal</span></div>'
+        + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + setsSummary + '</div>'
+        + '<div style="font-size:10px;color:var(--text3);text-transform:capitalize;">' + (ex.muscles||[]).join(', ') + '</div></div>';
     }).join('');
-    return `<div class="card" style="margin-bottom:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div style="font-weight:600;font-size:14px;">Session ${sess.sessionNum}</div>
-        <div style="font-size:12px;color:var(--text3);">${sess.time} · <span style="color:var(--blue)">${sess.cal} kcal</span></div>
-      </div>
-      ${exRows}
-      <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:capitalize;">Muscles: ${sess.muscles}</div>
-    </div>`;
+    return '<div class="card" style="margin-bottom:8px;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      + '<div style="font-weight:700;font-size:14px;">Session ' + sess.sessionNum + '</div>'
+      + '<div style="font-size:12px;color:var(--text3);">' + sess.time + ' · <span style="color:var(--blue)">' + sess.cal + ' kcal</span></div></div>'
+      + exRows
+      + '<div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:capitalize;">Muscles: ' + sess.muscles + '</div></div>';
   }).join('');
 }
 
@@ -1556,28 +1475,25 @@ async function sendAIMessage() {
   const input = document.getElementById('ai-input');
   const msg = input.value.trim();
   if (!msg) return;
-  if (!state.geminiKey) { showToast('Add your Gemini API key in Settings first'); toggleAI(); showGeminiPrompt(); return; }
   input.value = '';
   appendMsg(msg, 'user');
   const thinking = appendMsg('● ● ●', 'ai', true);
   thinking.classList.add('thinking');
-  const profileCtx = state.profile ? `User: ${state.profile.name}, age ${state.profile.age}, weight ${state.profile.weight}kg, height ${state.profile.height}cm, goal: ${state.profile.goal}, TDEE: ${calcTDEE(state.profile)} kcal. Today: ${state.todayFood.reduce((s,f)=>s+f.cal,0)} kcal eaten, ${state.todayExercises.reduce((s,e)=>s+e.cal,0)} kcal burned. Today muscles: ${state.selectedMuscles.join(', ')||'none'}.` : '';
+  const todayCal = state.todayFood.reduce((s,f)=>s+f.cal,0);
+  const todayBurned = state.todayExercises.reduce((s,e)=>s+e.cal,0);
+  const profileCtx = state.profile
+    ? 'User: ' + state.profile.name + ', age ' + state.profile.age + ', weight ' + state.profile.weight + 'kg, height ' + state.profile.height + 'cm, goal: ' + state.profile.goal + ', TDEE: ' + calcTDEE(state.profile) + ' kcal. Today: ' + todayCal + ' kcal eaten, ' + todayBurned + ' kcal burned.'
+    : '';
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${state.geminiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: `You are FitAI, a motivating personal health and fitness coach. Be concise, warm, practical. ${profileCtx} Give specific actionable advice. Keep responses under 150 words.` }] },
-        contents: [{ parts: [{ text: msg }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 300 }
-      })
-    });
-    const data = await res.json();
+    const systemPrompt = 'You are FitAI, a motivating personal health and fitness coach. Be concise, warm, practical. ' + profileCtx + ' Give specific actionable advice. Keep responses under 150 words.';
+    const fullPrompt = systemPrompt + '\n\nUser: ' + msg;
+    const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(fullPrompt) + '?model=openai');
+    const text = await res.text();
     thinking.remove();
-    appendMsg(data.candidates[0].content.parts[0].text, 'ai');
+    appendMsg(text, 'ai');
   } catch(e) {
     thinking.remove();
-    appendMsg("Having trouble connecting. Check your API key in Settings.", 'ai');
+    appendMsg('Having trouble connecting. Try again in a moment.', 'ai');
   }
 }
 
@@ -1745,7 +1661,7 @@ function renderSettings() {
   const tdee = calcTDEE(p);
   const adj = { cut: '-300 (deficit)', maintain: '+0', bulk: '+300 (surplus)' };
   document.getElementById('tdee-breakdown').innerHTML =
-    `BMR: ${bmr} kcal\n× Activity (${p.activity}): ${Math.round(bmr*p.activity)} kcal\nGoal adj: ${adj[p.goal]}\nTarget: ${tdee} kcal/day`;
+    'BMR: ' + bmr + ' kcal\n× Activity (' + p.activity + '): ' + Math.round(bmr*p.activity) + ' kcal\nGoal adj: ' + adj[p.goal] + '\nTarget: ' + tdee + ' kcal/day';
   renderGymRecs();
 }
 
@@ -1800,6 +1716,7 @@ function resetApp() {
 }
 
 function renderAll() {
+  restoreGymSession();
   if (!state.profile) return;
   const p = state.profile;
   const h = new Date().getHours();
@@ -1860,8 +1777,7 @@ async function checkDateChange() {
     state.todaySessions = [];
     state.syncedFoodIds = {};
     state.syncedSessionIds = {};
-    muscleBlocks = {};
-    selectedMuscles = [];
+    gymExercises = [];
     saveState();
     renderFood();
     renderExercises();
